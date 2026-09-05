@@ -26,6 +26,7 @@
   const btnForward = document.getElementById("btn-forward");
   const btnReload = document.getElementById("btn-reload");
   const btnHome = document.getElementById("btn-home");
+  const loadingPage = document.getElementById("loading-page");
 
   const IP_PHRASES = new Set([
     "find my ip",
@@ -39,22 +40,20 @@
     "ifconfig",
   ]);
 
-  const loadingPage = document.getElementById("loading-page");
-
   const state = {
     live: false,
     ws: null,
     wsGen: 0,
     reconnectTimer: null,
-    waitTimer: null,
     frameW: 1280,
     frameH: 800,
     lastClick: { t: 0, x: 0, y: 0, count: 0 },
     resizeTimer: null,
     pointerDown: false,
-    blobUrl: null,
-    frameBusy: false,
-    pendingFrame: null,
+    epoch: 0,
+    pendingJpeg: null,
+    painting: false,
+    minEpoch: 0,
   };
 
   function resolveUrl(input) {
@@ -82,29 +81,25 @@
     statusText.textContent = text;
   }
 
+  function showLoading(label) {
+    viewport.classList.add("is-live", "is-waiting");
+    stream.classList.remove("has-frame");
+    state.pendingJpeg = null;
+    if (loadingPage) loadingPage.textContent = label || "Loading remote page…";
+  }
+
+  function hideLoading() {
+    viewport.classList.remove("is-waiting");
+    stream.classList.add("has-frame");
+  }
+
   function setLive(on) {
     state.live = on;
     viewport.classList.toggle("is-live", on);
-    const waiting = on && !stream.classList.contains("has-frame");
-    viewport.classList.toggle("is-waiting", waiting);
-    if (waiting) {
-      if (loadingPage) loadingPage.textContent = "Loading remote page…";
-      armWaitWatchdog();
-    } else {
-      clearWaitWatchdog();
-    }
-    if (on) {
-      state.frameBusy = false;
-    }
     if (!on) {
-      clearWaitWatchdog();
+      viewport.classList.remove("is-waiting");
       stream.classList.remove("has-frame");
-      state.frameBusy = false;
-      state.pendingFrame = null;
-      if (state.blobUrl) {
-        URL.revokeObjectURL(state.blobUrl);
-        state.blobUrl = null;
-      }
+      state.pendingJpeg = null;
       try {
         const ctx = stream.getContext("2d");
         ctx.clearRect(0, 0, stream.width, stream.height);
@@ -118,66 +113,49 @@
     }
   }
 
-  function clearWaitWatchdog() {
-    if (state.waitTimer) {
-      clearTimeout(state.waitTimer);
-      state.waitTimer = null;
-    }
+  function beginNav(url, label) {
+    state.live = true;
+    state.minEpoch = state.epoch + 1;
+    state.pendingJpeg = null;
+    address.value = url || address.value;
+    tabTitle.textContent = "Loading…";
+    setStatus(label || "Loading…");
+    showLoading(label || "Loading remote page…");
   }
 
-  function armWaitWatchdog() {
-    clearWaitWatchdog();
-    state.waitTimer = setTimeout(() => {
-      if (!state.live || stream.classList.contains("has-frame")) return;
-      if (loadingPage) loadingPage.textContent = "Still waiting for video — reconnecting…";
-      connectSocket();
-    }, 2500);
-  }
-
-  function showFrame(b64) {
+  function paintJpeg(b64) {
     if (!state.live || !b64) return;
-    state.pendingFrame = b64;
-    if (!state.frameBusy) paintPending();
-  }
-
-  function paintPending() {
-    const b64 = state.pendingFrame;
-    if (!b64) {
-      state.frameBusy = false;
-      return;
-    }
-    state.pendingFrame = null;
-    state.frameBusy = true;
+    state.pendingJpeg = b64;
+    if (state.painting) return;
+    state.painting = true;
+    const epoch = state.epoch;
+    const data = state.pendingJpeg;
+    state.pendingJpeg = null;
     const img = new Image();
-    const url = `data:image/jpeg;base64,${b64}`;
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      state.frameBusy = false;
-      if (state.pendingFrame) paintPending();
-    };
     img.onload = () => {
+      if (epoch !== state.epoch) {
+        state.painting = false;
+        if (state.pendingJpeg) paintJpeg(state.pendingJpeg);
+        return;
+      }
       try {
         if (stream.width !== img.naturalWidth || stream.height !== img.naturalHeight) {
           stream.width = img.naturalWidth || state.frameW;
           stream.height = img.naturalHeight || state.frameH;
         }
-        const ctx = stream.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        stream.classList.add("has-frame");
-        viewport.classList.add("is-live");
-        viewport.classList.remove("is-waiting");
-        clearWaitWatchdog();
+        stream.getContext("2d").drawImage(img, 0, 0);
+        hideLoading();
       } catch {
-        // ignore draw errors
+        // ignore
       }
-      done();
+      state.painting = false;
+      if (state.pendingJpeg) paintJpeg(state.pendingJpeg);
     };
-    img.onerror = done;
-    img.src = url;
-    if (img.complete && img.naturalWidth) img.onload();
-    setTimeout(done, 400);
+    img.onerror = () => {
+      state.painting = false;
+      if (state.pendingJpeg) paintJpeg(state.pendingJpeg);
+    };
+    img.src = `data:image/jpeg;base64,${data}`;
   }
 
   async function api(path, opts) {
@@ -204,10 +182,8 @@
     try {
       const data = await api("/api/ip");
       enterApp(data.egress_ip);
-      return true;
     } catch {
       showLogin();
-      return false;
     }
   }
 
@@ -268,12 +244,27 @@
     showLogin();
   });
 
+  function applyMeta(meta) {
+    if (!meta) return;
+    if (typeof meta.epoch === "number" && meta.epoch > state.epoch) {
+      state.epoch = meta.epoch;
+    }
+    if (meta.title) tabTitle.textContent = meta.title;
+    if (meta.url) {
+      if (meta.url === "about:blank") {
+        setLive(false);
+        return;
+      }
+      address.value = meta.url;
+      setStatus(meta.url);
+      document.title = `${meta.title || "Home Browser"} — bytetech.cloud`;
+    }
+  }
+
   async function go(raw) {
     const url = resolveUrl(raw);
     if (!url) return;
-    address.value = url;
-    setLive(true);
-    setStatus("Loading…");
+    beginNav(url, "Loading remote page…");
     try {
       const meta = await api("/api/navigate", {
         method: "POST",
@@ -287,8 +278,13 @@
   }
 
   async function doAction(type) {
-    setLive(true);
-    setStatus(type === "reload" ? "Reloading…" : "Loading…");
+    const labels = {
+      reload: "Reloading…",
+      back: "Going back…",
+      forward: "Going forward…",
+      home: "Loading home…",
+    };
+    beginNav(type === "home" ? "https://www.google.com/" : address.value, labels[type] || "Loading…");
     try {
       const meta = await api("/api/action", {
         method: "POST",
@@ -299,20 +295,6 @@
       setStatus(err.message || "Action failed");
     }
     viewport.focus();
-  }
-
-  function applyMeta(meta) {
-    if (!meta) return;
-    if (meta.title) tabTitle.textContent = meta.title;
-    if (meta.url) {
-      if (meta.url === "about:blank") {
-        setLive(false);
-        return;
-      }
-      address.value = meta.url;
-      setStatus(meta.url);
-      document.title = `${meta.title || "Home Browser"} — bytetech.cloud`;
-    }
   }
 
   omniboxForm.addEventListener("submit", (e) => {
@@ -352,11 +334,8 @@
 
   async function toggleFullscreen() {
     try {
-      if (isFullscreen()) {
-        await document.exitFullscreen();
-      } else {
-        await shell.requestFullscreen();
-      }
+      if (isFullscreen()) await document.exitFullscreen();
+      else await shell.requestFullscreen();
     } catch {
       // ignore
     }
@@ -421,11 +400,27 @@
       } catch {
         return;
       }
+      if (msg.type === "navigating") {
+        if (typeof msg.epoch === "number") {
+          state.epoch = msg.epoch;
+          state.minEpoch = msg.epoch;
+        }
+        showLoading("Loading remote page…");
+        if (msg.url) address.value = msg.url;
+        setStatus("Loading…");
+        return;
+      }
       if (msg.type === "frame" && msg.data) {
+        if (typeof msg.epoch === "number") {
+          if (msg.epoch < state.minEpoch) return;
+          state.epoch = msg.epoch;
+        }
         state.frameW = msg.width || state.frameW;
         state.frameH = msg.height || state.frameH;
-        showFrame(msg.data);
-      } else if (msg.type === "meta") {
+        paintJpeg(msg.data);
+        return;
+      }
+      if (msg.type === "meta") {
         const remote = msg.url && msg.url !== "about:blank";
         if (remote && !state.live) setLive(true);
         if (state.live) applyMeta(msg);
@@ -497,7 +492,7 @@
   function sendMouse(action, e, extra) {
     if (!state.live) return;
     const p = localPoint(e.clientX, e.clientY);
-    const payload = {
+    sendWs({
       type: "mouse",
       action,
       x: p.x,
@@ -508,8 +503,7 @@
       buttons: typeof e.buttons === "number" ? e.buttons : 0,
       clickCount: extra && extra.clickCount ? extra.clickCount : 1,
       ...mods(e),
-    };
-    sendWs(payload);
+    });
   }
 
   viewport.addEventListener("mousedown", (e) => {
@@ -587,16 +581,14 @@
   viewport.addEventListener("touchmove", (e) => {
     if (!state.live) return;
     e.preventDefault();
-    const t = e.changedTouches[0];
-    sendMouse("move", touchToMouse(t, 0, 1));
+    sendMouse("move", touchToMouse(e.changedTouches[0], 0, 1));
   }, { passive: false });
 
   viewport.addEventListener("touchend", (e) => {
     if (!state.live) return;
     e.preventDefault();
-    const t = e.changedTouches[0];
     state.pointerDown = false;
-    sendMouse("up", touchToMouse(t, 0, 0));
+    sendMouse("up", touchToMouse(e.changedTouches[0], 0, 0));
   }, { passive: false });
 
   function isTypingTarget(el) {
@@ -608,27 +600,20 @@
 
   window.addEventListener("keydown", (e) => {
     const meta = e.metaKey || e.ctrlKey;
-
     if (e.key === "F11") {
       e.preventDefault();
       toggleFullscreen();
       return;
     }
-
     if (meta && (e.key === "l" || e.key === "L")) {
       e.preventDefault();
       address.focus();
       address.select();
       return;
     }
-
-    if (e.key === "Escape" && isFullscreen()) {
-      return;
-    }
-
+    if (e.key === "Escape" && isFullscreen()) return;
     if (!state.live) return;
     if (isTypingTarget(e.target)) return;
-
     if (meta && (e.key === "v" || e.key === "V")) {
       e.preventDefault();
       navigator.clipboard.readText().then((text) => {
@@ -636,7 +621,6 @@
       }).catch(() => {});
       return;
     }
-
     e.preventDefault();
     sendWs({
       type: "key",
@@ -655,6 +639,7 @@
     if (e.key === "F11") return;
     const meta = e.metaKey || e.ctrlKey;
     if (meta && (e.key === "l" || e.key === "L")) return;
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) return;
     sendWs({
       type: "key",
       action: "up",

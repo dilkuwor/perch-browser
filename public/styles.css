@@ -560,6 +560,10 @@ body.is-focus .statusbar {
   display: block;
 }
 
+.viewport.is-waiting .stream {
+  display: none !important;
+}
+
 .statusbar {
   display: flex;
   align-items: center;

@@ -12,7 +12,7 @@ const MAX_VIEW_W = 1920;
 const MAX_VIEW_H = 1080;
 const RESTART_DELAY_MS = 1500;
 const WS_BACKPRESSURE = 1_000_000;
-const FRAME_MIN_MS = 90;
+const FRAME_MIN_MS = 80;
 
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
@@ -170,37 +170,31 @@ class HomeBrowser {
     this.homeUrl = homeUrl || "https://www.google.com/";
     this.browser = null;
     this.page = null;
-    this.cdp = null;
+    this.inputCdp = null;
+    this.paintCdp = null;
     this.clients = new Set();
     this.viewport = { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
     this.closed = false;
     this.launching = false;
-    this.screencastOn = false;
-    this._captureRunning = false;
-    this._noOptimize = true;
-    this.lastMeta = { url: "about:blank", title: "New Tab" };
+    this.lastMeta = { url: "about:blank", title: "New Tab", epoch: 0 };
+    this.epoch = 0;
     this._restartTimer = null;
     this._restartDelay = RESTART_DELAY_MS;
-    this._lastFrameAt = 0;
-    this._pumpTimer = null;
+    this._captureRunning = false;
+    this._capturing = false;
+    this._navigating = false;
     this._frameLogged = false;
-    this._paintBusy = false;
-    this._paintAgain = false;
-    this._recovering = false;
-    this._inFlightInput = false;
-    this._inputActive = false;
-    this._captureInFlight = false;
-    this._lastInputAt = 0;
     this._pendingMove = null;
     this._pendingExtras = [];
-    this._timeouts = 0;
-    this._lastSentAt = 0;
-    this._screencastStartedAt = 0;
-    this._metaTimer = null;
+    this._draining = false;
   }
 
   get ready() {
-    return Boolean(this.page && this.cdp && this.browser);
+    return Boolean(this.page && this.browser);
+  }
+
+  get cdp() {
+    return this.inputCdp;
   }
 
   async ensure() {
@@ -266,8 +260,8 @@ class HomeBrowser {
         if (this.closed) return;
         console.error("[home-browser] Chromium disconnected; will restart");
         this.page = null;
-        this.cdp = null;
-        this.screencastOn = false;
+        this.inputCdp = null;
+        this.paintCdp = null;
         this.browser = null;
         this._scheduleRestart();
       });
@@ -283,7 +277,8 @@ class HomeBrowser {
     } catch (err) {
       console.error(`[home-browser] Chromium launch failed: ${err.message}`);
       this.page = null;
-      this.cdp = null;
+      this.inputCdp = null;
+      this.paintCdp = null;
       this.browser = null;
       this._scheduleRestart();
       throw err;
@@ -302,13 +297,25 @@ class HomeBrowser {
     }, delay);
   }
 
+  async _detach(session) {
+    if (!session) return;
+    try {
+      session.removeAllListeners();
+      await session.detach();
+    } catch {
+      // ignore
+    }
+  }
+
   async _killBrowser() {
     this._stopCaptureLoop();
     const browser = this.browser;
     this.browser = null;
     this.page = null;
-    this.cdp = null;
-    this.screencastOn = false;
+    await this._detach(this.inputCdp);
+    await this._detach(this.paintCdp);
+    this.inputCdp = null;
+    this.paintCdp = null;
     if (!browser) return;
     try {
       await browser.close();
@@ -335,57 +342,27 @@ class HomeBrowser {
     page.on("error", (err) => {
       console.error(`[home-browser] page error: ${err.message}`);
     });
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame()) this._queueMeta();
-    });
-    page.on("load", () => this._queueMeta());
-    page.on("domcontentloaded", () => this._queueMeta());
 
-    await this._attachCdp(page);
+    await this._attachSessions(page);
   }
 
-  async _attachCdp(page) {
-    if (this.cdp) {
-      try {
-        this.cdp.removeAllListeners();
-        await this.cdp.detach();
-      } catch {
-        // ignore
-      }
-      this.cdp = null;
-      this.screencastOn = false;
-    }
-    const cdp = await page.createCDPSession();
-    this.cdp = cdp;
-    cdp.on("disconnected", () => {
-      this.screencastOn = false;
-    });
-    await cdp.send("Page.enable").catch(() => {});
+  async _attachSessions(page) {
+    await this._detach(this.inputCdp);
+    await this._detach(this.paintCdp);
+    this.inputCdp = await page.createCDPSession();
+    this.paintCdp = await page.createCDPSession();
+    await this.inputCdp.send("Page.enable").catch(() => {});
+    await this.paintCdp.send("Page.enable").catch(() => {});
   }
 
   async _recreatePage() {
     if (this.closed || !this.browser) return;
     this.page = null;
-    this.cdp = null;
-    this.screencastOn = false;
+    this.inputCdp = null;
+    this.paintCdp = null;
     const page = await this.browser.newPage();
     await this._bindPage(page);
     if (this.clients.size > 0) this._startCaptureLoop();
-  }
-
-  async _recoverCdp() {
-    if (this._recovering || !this.page || this.closed) return;
-    this._recovering = true;
-    console.warn("[home-browser] recovering CDP session");
-    try {
-      this.screencastOn = false;
-      await this._attachCdp(this.page);
-      this._timeouts = 0;
-    } catch (err) {
-      console.error(`[home-browser] CDP recover failed: ${err.message}`);
-    } finally {
-      this._recovering = false;
-    }
   }
 
   _startCaptureLoop() {
@@ -400,68 +377,44 @@ class HomeBrowser {
     this._captureRunning = false;
   }
 
-  async _captureOnce() {
-    const opts = {
-      format: "jpeg",
-      quality: JPEG_QUALITY,
-    };
-    if (!this._noOptimize) opts.optimizeForSpeed = true;
-    try {
-      return await this.cdp.send("Page.captureScreenshot", opts);
-    } catch (err) {
-      const msg = err && err.message ? err.message : "";
-      if (!this._noOptimize && /optimizeForSpeed|Unknown.*parameter/i.test(msg)) {
-        this._noOptimize = true;
-        return this.cdp.send("Page.captureScreenshot", {
+  async _captureLoop() {
+    while (this._captureRunning && !this.closed) {
+      if (this.clients.size === 0 || !this.paintCdp || this._navigating) {
+        await delay(20);
+        continue;
+      }
+      const epoch = this.epoch;
+      this._capturing = true;
+      const started = Date.now();
+      try {
+        const result = await this.paintCdp.send("Page.captureScreenshot", {
           format: "jpeg",
           quality: JPEG_QUALITY,
         });
-      }
-      throw err;
-    }
-  }
-
-  async _captureLoop() {
-    while (this._captureRunning && !this.closed) {
-      if (this.clients.size === 0 || !this.cdp) {
-        await delay(150);
-        continue;
-      }
-      if (this._inputActive || Date.now() - this._lastInputAt < 50) {
-        await delay(16);
-        continue;
-      }
-      const started = Date.now();
-      this._captureInFlight = true;
-      try {
-        const result = await this._captureOnce();
-        if (result && result.data && !this._inputActive) {
-          this._sendFrame(result.data, this.viewport.width, this.viewport.height);
+        if (
+          result &&
+          result.data &&
+          !this._navigating &&
+          epoch === this.epoch &&
+          this.clients.size > 0
+        ) {
+          this._sendFrame(result.data, epoch);
         }
       } catch {
-        await delay(80);
+        if (!this._navigating && this.page && this._captureRunning) {
+          await this._attachSessions(this.page).catch(() => {});
+        }
+        await delay(60);
       } finally {
-        this._captureInFlight = false;
+        this._capturing = false;
       }
       const wait = FRAME_MIN_MS - (Date.now() - started);
       if (wait > 0) await delay(wait);
     }
   }
 
-  _sendFrame(data, width, height) {
-    if (!data || this.clients.size === 0) return false;
-    let open = 0;
-    let blocked = 0;
-    for (const ws of this.clients) {
-      if (ws.readyState === 1) {
-        open += 1;
-        if (ws.bufferedAmount >= WS_BACKPRESSURE) blocked += 1;
-      }
-    }
-    if (!open || blocked === open) return false;
-    this._lastFrameAt = Date.now();
-    this._lastSentAt = this._lastFrameAt;
-    this._timeouts = 0;
+  _sendFrame(data, epoch) {
+    if (!data || this.clients.size === 0) return;
     if (!this._frameLogged) {
       this._frameLogged = true;
       console.log("[home-browser] streaming frames");
@@ -469,38 +422,15 @@ class HomeBrowser {
     const payload = JSON.stringify({
       type: "frame",
       data,
-      width: width || this.viewport.width,
-      height: height || this.viewport.height,
+      width: this.viewport.width,
+      height: this.viewport.height,
+      epoch: epoch == null ? this.epoch : epoch,
     });
     for (const ws of this.clients) {
       if (ws.readyState === 1 && ws.bufferedAmount < WS_BACKPRESSURE) {
         ws.send(payload);
       }
     }
-    return true;
-  }
-
-  _queueMeta() {
-    if (this._metaTimer) return;
-    this._metaTimer = setTimeout(() => {
-      this._metaTimer = null;
-      this._sendMeta().catch(() => {});
-    }, 300);
-  }
-
-  async _sendMeta() {
-    if (!this.page) return;
-    let url = "about:blank";
-    let title = "New Tab";
-    try {
-      url = this.page.url() || url;
-      title = (await this.page.title()) || title;
-    } catch {
-      // ignore
-    }
-    if (!title) title = url && url !== "about:blank" ? url : "New Tab";
-    this.lastMeta = { url, title };
-    this.broadcast({ type: "meta", url, title });
   }
 
   broadcast(obj) {
@@ -516,14 +446,28 @@ class HomeBrowser {
     }
   }
 
+  async _sendMeta() {
+    if (!this.page) return this.lastMeta;
+    let url = "about:blank";
+    let title = "New Tab";
+    try {
+      url = this.page.url() || url;
+      title = (await this.page.title()) || title;
+    } catch {
+      // ignore
+    }
+    if (!title) title = url && url !== "about:blank" ? url : "New Tab";
+    this.lastMeta = { url, title, epoch: this.epoch };
+    this.broadcast({ type: "meta", url, title, epoch: this.epoch });
+    return this.lastMeta;
+  }
+
   addClient(ws) {
     this.clients.add(ws);
-    if (this.lastMeta) {
-      try {
-        ws.send(JSON.stringify({ type: "meta", ...this.lastMeta }));
-      } catch {
-        // ignore
-      }
+    try {
+      ws.send(JSON.stringify({ type: "meta", ...this.lastMeta }));
+    } catch {
+      // ignore
     }
     this.ensure()
       .then(() => this._startCaptureLoop())
@@ -533,6 +477,81 @@ class HomeBrowser {
   removeClient(ws) {
     this.clients.delete(ws);
     if (this.clients.size === 0) this._stopCaptureLoop();
+  }
+
+  async _runNavigation(fn, pendingUrl) {
+    await this.ensure();
+    this.epoch += 1;
+    this._navigating = true;
+    this.broadcast({
+      type: "navigating",
+      epoch: this.epoch,
+      url: pendingUrl || "",
+    });
+
+    let waited = 0;
+    while (this._capturing && waited < 600) {
+      await delay(10);
+      waited += 10;
+    }
+    if (this._capturing && this.page) {
+      await this._attachSessions(this.page).catch(() => {});
+    }
+
+    let meta = this.lastMeta;
+    try {
+      await fn();
+    } finally {
+      meta = await this._sendMeta();
+      this._navigating = false;
+      this._startCaptureLoop();
+    }
+    return meta;
+  }
+
+  async navigate(rawUrl) {
+    const href = assertAllowedUrl(resolveUrl(rawUrl, this.homeUrl));
+    return this._runNavigation(async () => {
+      try {
+        await this.page.goto(href, { waitUntil: "domcontentloaded", timeout: 25000 });
+      } catch (err) {
+        if (!/timeout/i.test(err.message || "")) throw err;
+      }
+    }, href);
+  }
+
+  async action(type) {
+    return this._runNavigation(async () => {
+      switch (type) {
+        case "back":
+          await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+          break;
+        case "forward":
+          await this.page.goForward({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+          break;
+        case "reload":
+          await this.page.reload({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+          break;
+        case "home":
+          await this.page.goto(this.homeUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
+          break;
+        default:
+          throw new Error("Unknown action");
+      }
+    }, type === "home" ? this.homeUrl : this.lastMeta.url);
+  }
+
+  async resize(width, height) {
+    const w = clamp(Math.round(Number(width) || DEFAULT_WIDTH), MIN_VIEW_W, MAX_VIEW_W);
+    const h = clamp(Math.round(Number(height) || DEFAULT_HEIGHT), MIN_VIEW_H, MAX_VIEW_H);
+    if (Math.abs(w - this.viewport.width) < 8 && Math.abs(h - this.viewport.height) < 8) return;
+    this.viewport = { width: w, height: h };
+    if (!this.page) return;
+    try {
+      await this.page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
+    } catch {
+      // ignore
+    }
   }
 
   scalePoint(msg) {
@@ -546,62 +565,9 @@ class HomeBrowser {
     };
   }
 
-  async navigate(rawUrl) {
-    await this.ensure();
-    const href = assertAllowedUrl(resolveUrl(rawUrl, this.homeUrl));
-    try {
-      await this.page.goto(href, { waitUntil: "domcontentloaded", timeout: 25000 });
-    } catch (err) {
-      if (!/timeout/i.test(err.message)) throw err;
-    }
-    await this._sendMeta();
-    this._startCaptureLoop();
-    return this.lastMeta;
-  }
-
-  async action(type) {
-    await this.ensure();
-    switch (type) {
-      case "back":
-        await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-        break;
-      case "forward":
-        await this.page.goForward({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-        break;
-      case "reload":
-        await this.page.reload({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-        break;
-      case "home":
-        await this.page.goto(this.homeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-        break;
-      default:
-        throw new Error("Unknown action");
-    }
-    await this._sendMeta();
-    this._startCaptureLoop();
-    return this.lastMeta;
-  }
-
-  async resize(width, height) {
-    const w = clamp(Math.round(Number(width) || DEFAULT_WIDTH), MIN_VIEW_W, MAX_VIEW_W);
-    const h = clamp(Math.round(Number(height) || DEFAULT_HEIGHT), MIN_VIEW_H, MAX_VIEW_H);
-    if (Math.abs(w - this.viewport.width) < 8 && Math.abs(h - this.viewport.height) < 8) return;
-    this.viewport = { width: w, height: h };
-    if (!this.page) return;
-    try {
-      await this.page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
-    } catch {
-      return;
-    }
-  }
-
   handleInput(msg) {
-    if (!this.ready || !msg || !msg.type) return Promise.resolve();
-    if (msg.type === "resize") {
-      return this.resize(msg.width, msg.height);
-    }
-    this._inputActive = true;
-    this._lastInputAt = Date.now();
+    if (!this.ready || this._navigating || !msg || !msg.type) return Promise.resolve();
+    if (msg.type === "resize") return this.resize(msg.width, msg.height);
     if (msg.type === "mouse" && msg.action === "move") {
       this._pendingMove = msg;
     } else if (msg.type === "mouse" || msg.type === "wheel" || msg.type === "key" || msg.type === "paste") {
@@ -613,39 +579,27 @@ class HomeBrowser {
   }
 
   async _drainInput() {
-    if (this._inFlightInput) return;
-    this._inFlightInput = true;
-    this._inputActive = true;
+    if (this._draining) return;
+    this._draining = true;
     try {
-      let waited = 0;
-      while (this._captureInFlight && waited < 800) {
-        await delay(8);
-        waited += 8;
-      }
       while (this._pendingExtras.length || this._pendingMove) {
+        if (this._navigating || !this.inputCdp) break;
         const extra = this._pendingExtras.shift();
         const next = extra || this._pendingMove;
         if (!extra) this._pendingMove = null;
         if (!next) break;
         try {
           await this._dispatch(next);
-          this._timeouts = 0;
-        } catch (err) {
-          const timedOut = /timed out/i.test(err.message || "");
-          if (timedOut) {
-            this._timeouts += 1;
-            this._pendingMove = null;
-            this._pendingExtras.length = 0;
-            if (this._timeouts >= 2) await this._recoverCdp();
-            break;
-          }
+        } catch {
+          this._pendingMove = null;
+          this._pendingExtras.length = 0;
+          if (this.page) await this._attachSessions(this.page).catch(() => {});
+          break;
         }
       }
     } finally {
-      this._lastInputAt = Date.now();
-      this._inputActive = false;
-      this._inFlightInput = false;
-      if (this._pendingExtras.length || this._pendingMove) {
+      this._draining = false;
+      if ((this._pendingExtras.length || this._pendingMove) && !this._navigating) {
         setImmediate(() => this._drainInput());
       }
     }
@@ -674,7 +628,6 @@ class HomeBrowser {
     const { x, y } = this.scalePoint(msg);
     const button = MOUSE_BUTTONS[msg.button] || "left";
     const clickCount = clamp(Math.round(Number(msg.clickCount) || 1), 1, 3);
-    const modifiers = modifiersFrom(msg);
     const action = msg.action;
     let type = "mouseMoved";
     if (action === "down") type = "mousePressed";
@@ -683,13 +636,13 @@ class HomeBrowser {
       type,
       x,
       y,
-      modifiers,
+      modifiers: modifiersFrom(msg),
       button,
       clickCount: type === "mouseMoved" ? 0 : clickCount,
       pointerType: "mouse",
     };
     if (typeof msg.buttons === "number") params.buttons = msg.buttons;
-    const sent = this.cdp.send("Input.dispatchMouseEvent", params);
+    const sent = this.inputCdp.send("Input.dispatchMouseEvent", params);
     if (action === "move") {
       sent.catch(() => {});
       return;
@@ -699,7 +652,7 @@ class HomeBrowser {
 
   async _wheel(msg) {
     const { x, y } = this.scalePoint(msg);
-    await this.cdp.send("Input.dispatchMouseEvent", {
+    await this.inputCdp.send("Input.dispatchMouseEvent", {
       type: "mouseWheel",
       x,
       y,
@@ -715,17 +668,16 @@ class HomeBrowser {
     const code = String(msg.code ?? "");
     const vk = virtualKey(msg);
     const modifiers = modifiersFrom(msg);
-    const isChar =
-      key.length === 1 && !msg.ctrl && !msg.alt && !msg.meta;
+    const isChar = key.length === 1 && !msg.ctrl && !msg.alt && !msg.meta;
 
     if (isChar) {
       if (msg.action === "up") return;
-      await this.cdp.send("Input.insertText", { text: key });
+      await this.inputCdp.send("Input.insertText", { text: key });
       return;
     }
 
     if (msg.action === "up") {
-      await this.cdp.send("Input.dispatchKeyEvent", {
+      await this.inputCdp.send("Input.dispatchKeyEvent", {
         type: "keyUp",
         key,
         code,
@@ -736,7 +688,7 @@ class HomeBrowser {
       return;
     }
 
-    await this.cdp.send("Input.dispatchKeyEvent", {
+    await this.inputCdp.send("Input.dispatchKeyEvent", {
       type: "rawKeyDown",
       key,
       code,
@@ -747,7 +699,7 @@ class HomeBrowser {
     });
 
     if (key === "Enter") {
-      await this.cdp.send("Input.dispatchKeyEvent", {
+      await this.inputCdp.send("Input.dispatchKeyEvent", {
         type: "char",
         key,
         code,
@@ -763,7 +715,7 @@ class HomeBrowser {
   async _paste(msg) {
     const text = String(msg.text ?? "");
     if (!text) return;
-    await this.cdp.send("Input.insertText", { text });
+    await this.inputCdp.send("Input.insertText", { text });
   }
 
   async close() {
