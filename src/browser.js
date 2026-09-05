@@ -1,6 +1,8 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const puppeteer = require("puppeteer-core");
 
 const DEFAULT_WIDTH = 1280;
@@ -208,33 +210,37 @@ class HomeBrowser {
     try {
       await this._killBrowser();
       const executablePath = findChrome();
+      const headed = String(process.env.CHROME_HEADLESS || "1") === "0";
+      const userDataDir =
+        (process.env.CHROME_USER_DATA && process.env.CHROME_USER_DATA.trim()) ||
+        path.join(os.tmpdir(), "home-browser-chrome");
       const args = [
         "--disable-dev-shm-usage",
-        `--window-size=${DEFAULT_WIDTH},${DEFAULT_HEIGHT}`,
+        `--window-size=${this.viewport.width},${this.viewport.height}`,
         "--no-first-run",
         "--no-default-browser-check",
-        "--disable-sync",
-        "--disable-translate",
-        "--disable-features=Translate,MediaRouter,PaintHolding",
-        "--disable-background-networking",
-        "--disable-component-update",
-        "--metrics-recording-only",
         "--force-device-scale-factor=1",
         "--hide-crash-restore-bubble",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-popup-blocking",
       ];
       if (String(process.env.CHROME_NO_SANDBOX) === "1") {
         args.push("--no-sandbox", "--disable-setuid-sandbox");
       }
 
-      console.log(`[home-browser] launching Chromium: ${executablePath}`);
+      console.log(
+        `[home-browser] launching Chromium: ${executablePath} headless=${!headed}`
+      );
       const launchOpts = {
         executablePath,
-        headless: true,
+        headless: headed ? false : true,
         dumpio: false,
         protocolTimeout: 180000,
+        userDataDir,
+        ignoreDefaultArgs: ["--enable-automation"],
         defaultViewport: {
           width: this.viewport.width,
           height: this.viewport.height,
@@ -266,6 +272,7 @@ class HomeBrowser {
         this._scheduleRestart();
       });
 
+      this._listenTargets();
       const pages = await this.browser.pages();
       this.page = pages[0] || (await this.browser.newPage());
       await this._bindPage(this.page);
@@ -316,12 +323,44 @@ class HomeBrowser {
     await this._detach(this.paintCdp);
     this.inputCdp = null;
     this.paintCdp = null;
+    this._targetsBound = false;
     if (!browser) return;
     try {
       await browser.close();
     } catch {
       // ignore
     }
+  }
+
+  _listenTargets() {
+    if (!this.browser || this._targetsBound) return;
+    this._targetsBound = true;
+    this.browser.on("targetcreated", async (target) => {
+      if (this.closed || target.type() !== "page") return;
+      let page;
+      try {
+        page = await target.page();
+      } catch {
+        return;
+      }
+      if (!page || page === this.page) return;
+      console.log("[home-browser] new window; switching view");
+      await this._adoptPage(page).catch((err) => {
+        console.error(`[home-browser] adopt page failed: ${err.message}`);
+      });
+    });
+  }
+
+  async _adoptPage(page) {
+    const previous = this.page;
+    if (previous && previous !== page) {
+      previous.removeAllListeners("close");
+      previous.removeAllListeners("error");
+      previous.removeAllListeners("popup");
+    }
+    await this._bindPage(page);
+    await this._sendMeta();
+    if (this.clients.size > 0) this._startCaptureLoop();
   }
 
   async _bindPage(page) {
@@ -331,9 +370,12 @@ class HomeBrowser {
       height: this.viewport.height,
       deviceScaleFactor: 1,
     });
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    }).catch(() => {});
 
     page.on("close", () => {
-      if (this.closed) return;
+      if (this.closed || this.page !== page) return;
       console.error("[home-browser] page closed; recreating");
       this._recreatePage().catch((err) => {
         console.error(`[home-browser] recreate page failed: ${err.message}`);
@@ -341,6 +383,13 @@ class HomeBrowser {
     });
     page.on("error", (err) => {
       console.error(`[home-browser] page error: ${err.message}`);
+    });
+    page.on("popup", (popup) => {
+      if (!popup || this.closed) return;
+      console.log("[home-browser] popup; switching view");
+      this._adoptPage(popup).catch((err) => {
+        console.error(`[home-browser] popup adopt failed: ${err.message}`);
+      });
     });
 
     await this._attachSessions(page);
