@@ -2,7 +2,8 @@
   "name": "home-browser",
   "version": "1.0.0",
   "private": true,
-  "description": "Perch — a personal remote browser (remote Chromium on your home server)",
+  "description": "Perch \u2014 a personal remote browser (remote Chromium on your home server)",
+  "license": "MIT",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

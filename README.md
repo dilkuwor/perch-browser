@@ -38,6 +38,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 - [Reverse proxy (TLS)](#reverse-proxy-tls)
 - [Health](#health)
 - [Security notes](#security-notes)
+- [License](#license)
 
 ## Requirements
 
@@ -256,3 +257,7 @@ curl -s http://127.0.0.1:8080/health
 - Login is rate-limited, and passwords are never logged.
 - Chromium's DevTools port is bound to loopback / a pipe only. Do not publish `9222`.
 - This app can reach whatever the home server can reach. Treat the password like a house key.
+
+## License
+
+Released under the [MIT License](LICENSE).
