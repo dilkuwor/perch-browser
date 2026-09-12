@@ -12,41 +12,60 @@
   <div id="login-screen" class="screen login-screen">
     <svg class="login-bg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
       <defs>
-        <linearGradient id="perch-streak-a" x1="1" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#9cbcff" />
-          <stop offset="0.5" stop-color="#5b7dff" />
-          <stop offset="1" stop-color="#3a56d8" stop-opacity="0.15" />
+        <!-- Waves fade in from a dim violet on the left to a bright blue on the right,
+             so the luminous rim gathers on the right like a lit horizon. -->
+        <linearGradient id="perch-wave-a" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#8a6cff" stop-opacity="0.34" />
+          <stop offset="0.4" stop-color="#6f80ff" stop-opacity="0.72" />
+          <stop offset="0.8" stop-color="#6ea8ff" stop-opacity="0.98" />
+          <stop offset="1" stop-color="#b6d5ff" stop-opacity="0.95" />
         </linearGradient>
-        <linearGradient id="perch-streak-b" x1="0" y1="0" x2="1" y2="0.35">
-          <stop offset="0" stop-color="#7a5cff" stop-opacity="0.08" />
-          <stop offset="0.45" stop-color="#7d6bff" />
-          <stop offset="1" stop-color="#5b8cff" />
+        <linearGradient id="perch-wave-b" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#8a5cff" stop-opacity="0.24" />
+          <stop offset="0.5" stop-color="#6a6bff" stop-opacity="0.58" />
+          <stop offset="0.85" stop-color="#5f9bff" stop-opacity="0.9" />
+          <stop offset="1" stop-color="#a6caff" stop-opacity="0.85" />
         </linearGradient>
-        <radialGradient id="perch-limb" cx="1" cy="0.52" r="0.6">
-          <stop offset="0" stop-color="#6b90ff" stop-opacity="0.62" />
-          <stop offset="0.45" stop-color="#3f5fd8" stop-opacity="0.18" />
+        <radialGradient id="perch-glow-r" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stop-color="#7aa6ff" stop-opacity="0.7" />
+          <stop offset="0.42" stop-color="#4f78e8" stop-opacity="0.22" />
           <stop offset="1" stop-color="#000000" stop-opacity="0" />
         </radialGradient>
-        <radialGradient id="perch-neb" cx="0.12" cy="0.2" r="0.5">
-          <stop offset="0" stop-color="#6d5cff" stop-opacity="0.18" />
+        <radialGradient id="perch-glow-l" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stop-color="#7a5cff" stop-opacity="0.38" />
           <stop offset="1" stop-color="#000000" stop-opacity="0" />
         </radialGradient>
-        <filter id="perch-soft" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="24" />
+        <radialGradient id="perch-neb" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stop-color="#6d5cff" stop-opacity="0.22" />
+          <stop offset="1" stop-color="#000000" stop-opacity="0" />
+        </radialGradient>
+        <filter id="perch-soft" x="-20%" y="-40%" width="140%" height="180%">
+          <feGaussianBlur stdDeviation="22" />
         </filter>
-        <filter id="perch-sharp" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="9" />
+        <filter id="perch-sharp" x="-20%" y="-40%" width="140%" height="180%">
+          <feGaussianBlur stdDeviation="5" />
         </filter>
       </defs>
-      <rect x="0" y="0" width="1600" height="900" fill="url(#perch-neb)" />
-      <rect x="760" y="0" width="840" height="900" fill="url(#perch-limb)" />
-      <g fill="none" filter="url(#perch-soft)">
-        <ellipse cx="1600" cy="450" rx="360" ry="620" stroke="url(#perch-streak-a)" stroke-width="34" opacity="0.85" />
-        <path d="M-180,620 C240,660 520,520 920,600 C1080,632 1180,690 1320,760" stroke="url(#perch-streak-b)" stroke-width="22" stroke-linecap="round" opacity="0.7" />
+      <!-- ambient glows: bright blue horizon on the right, violet on the left, faint nebula upper-left -->
+      <ellipse cx="1540" cy="530" rx="620" ry="560" fill="url(#perch-glow-r)" />
+      <ellipse cx="-60" cy="650" rx="560" ry="480" fill="url(#perch-glow-l)" />
+      <ellipse cx="180" cy="205" rx="380" ry="320" fill="url(#perch-neb)" />
+      <g opacity="0.5" fill="#cdd9ff">
+        <circle cx="150" cy="150" r="1.4" opacity="0.7" />
+        <circle cx="255" cy="235" r="1.1" opacity="0.5" />
+        <circle cx="95" cy="300" r="1.2" opacity="0.55" />
+        <circle cx="330" cy="120" r="1" opacity="0.45" />
+        <circle cx="60" cy="205" r="1.1" opacity="0.5" />
       </g>
+      <!-- soft, wide wave glow -->
+      <g fill="none" filter="url(#perch-soft)">
+        <path d="M-90,412 C250,458 520,516 830,506 C1150,496 1390,452 1710,394" stroke="url(#perch-wave-a)" stroke-width="26" stroke-linecap="round" opacity="0.72" />
+        <path d="M-90,486 C250,536 520,600 830,586 C1150,572 1410,524 1710,458" stroke="url(#perch-wave-b)" stroke-width="20" stroke-linecap="round" opacity="0.58" />
+      </g>
+      <!-- bright thin cores (the lit rim) -->
       <g fill="none" filter="url(#perch-sharp)">
-        <ellipse cx="1600" cy="450" rx="360" ry="620" stroke="#c6d8ff" stroke-width="4" opacity="0.6" />
-        <path d="M-180,620 C240,660 520,520 920,600 C1080,632 1180,690 1320,760" stroke="#cdd9ff" stroke-width="2.5" stroke-linecap="round" opacity="0.42" />
+        <path d="M-90,412 C250,458 520,516 830,506 C1150,496 1390,452 1710,394" stroke="url(#perch-wave-a)" stroke-width="3" stroke-linecap="round" opacity="0.92" />
+        <path d="M-90,486 C250,536 520,600 830,586 C1150,572 1410,524 1710,458" stroke="url(#perch-wave-b)" stroke-width="2.4" stroke-linecap="round" opacity="0.72" />
       </g>
     </svg>
     <div class="login-glow" aria-hidden="true"></div>
