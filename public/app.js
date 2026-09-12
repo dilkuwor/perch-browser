@@ -359,7 +359,7 @@
       setTabTitle("New Tab");
       address.value = "";
       setStatus("Start page");
-      document.title = "Home Browser — bytetech.cloud";
+      document.title = "Perch — bytetech.cloud";
       blurKbd();
     }
   }
@@ -565,7 +565,7 @@
       }
       if (document.activeElement !== address) address.value = meta.url;
       if (!viewport.classList.contains("is-waiting")) setStatus(meta.url);
-      document.title = `${meta.title || "Home Browser"} — bytetech.cloud`;
+      document.title = `${meta.title || "Perch"} — bytetech.cloud`;
     }
     if (meta.title && !(viewport.classList.contains("is-waiting") && meta.title === meta.url)) {
       setTabTitle(meta.title);

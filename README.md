@@ -1,8 +1,10 @@
-# Home Browser
+# Perch
 
-A personal remote Chromium for your home server. Open a desktop-style browser UI in any phone or laptop, and the pages actually load in a real Chrome process running **at home**. Frames stream into the viewport over WebSocket. Mouse, wheel, keyboard, and paste are forwarded with Chrome DevTools Protocol.
+**Perch is a personal remote browser.** A real Chromium runs on your home server and streams to any phone or laptop; the pages actually load **at home**, not on the device in your hand. Open a desktop-style browser UI anywhere, and frames stream into the viewport over WebSocket. Mouse, wheel, keyboard, and paste are forwarded with Chrome DevTools Protocol.
 
-This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>` of google.com (that is blocked by almost every site). It is a remote Chromium.
+This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>` of google.com (that is blocked by almost every site). It is a real remote Chromium — your own vantage on the web, kept at home.
+
+> The npm package and Docker image are still named `home-browser`; **Perch** is the product name.
 
 Single Chromium session: there is one browser process. A second login uses (and can take over) that same session — same cookies, same tab, same page.
 
