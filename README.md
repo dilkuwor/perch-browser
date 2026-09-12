@@ -57,11 +57,17 @@ PORT=8080
 HOME_URL=https://www.google.com/
 CHROME_PATH=
 CHROME_NO_SANDBOX=0
+CHROME_HEADLESS=1
+CHROME_USER_DATA=
+JPEG_QUALITY=60
 ```
 
 - `APP_PASSWORD` is required. The process **refuses to start** if it is missing or shorter than 12 characters.
 - Leave `CHROME_PATH` empty to auto-detect Chrome/Chromium. Set it if the binary lives somewhere unusual.
 - If Chromium fails with a sandbox error (common on some VPS / LXC hosts), set `CHROME_NO_SANDBOX=1`. Prefer a real user namespace sandbox when you can.
+- `CHROME_HEADLESS=0` runs a real (headed) Chromium under Xvfb. This is what the Docker image does and it is what you want for Google, CAPTCHAs and corporate sign-in pages: headless Chromium is easy to detect and gets challenged much more often.
+- `CHROME_USER_DATA` keeps cookies and site trust between restarts. Losing the profile on every restart means every site treats you as a brand-new visitor.
+- `JPEG_QUALITY` (20-95) trades sharpness for bandwidth. Try 45 on a slow mobile link.
 
 Open:
 
@@ -106,9 +112,27 @@ Log in with the password from `.env`. The login is real. Any other password is r
 
 ## How it works
 
-Node.js launches system Chromium with `puppeteer-core`, talks to it over Chrome DevTools Protocol (pipe / loopback only — debug port is never published on `0.0.0.0:9222`), JPEG-screencasts the page into the big viewport, and forwards mouse, wheel, keyboard, and paste.
+Node.js launches system Chromium with `puppeteer-core`, talks to it over Chrome DevTools Protocol (pipe / loopback only — debug port is never published on `0.0.0.0:9222`), and forwards mouse, wheel, keyboard, and paste.
+
+Frames come from Chromium's own `Page.startScreencast`: Chromium pushes a JPEG only when pixels change, so an idle page costs nothing and a scrolling page streams at the compositor rate. Frames travel as **binary** WebSocket messages (a 9-byte header plus the JPEG, no base64, no JSON), and the client decodes them off the main thread with `createImageBitmap`, always painting only the newest one.
+
+Navigation is non-blocking. Changing the URL sends `Page.navigate` and returns; you keep full mouse and keyboard control while the site loads, and the viewport is cleared the moment you hit Go. Every navigation bumps an *epoch*; frames from the old document are dropped, so you never see stale content from the previous URL after a URL change. JavaScript dialogs (`alert`, `confirm`, `beforeunload`) are auto-answered so they can never wedge the stream, and downloads are refused.
+
+Popups and new tabs (SSO sign-in windows, `target=_blank` links) take over the view automatically. When such a window closes, the view returns to the page that opened it, which is what an OAuth / SSO round-trip expects.
+
+Keyboard input is delivered as real `keyDown` / `keyUp` events (with `text` for printable keys), not text insertion, so sites that listen to key events behave like they do locally. A Mac client's Cmd is translated to Ctrl when Chromium runs on Linux, so Cmd+A / Cmd+C / Cmd+V work. Chromium is launched without the automation banner or the `navigator.webdriver` flag, and in headless mode the `HeadlessChrome` user agent (including client hints) is rewritten.
 
 Until the first real navigation, the viewport shows the new-tab start page (Google, YouTube, Find my IP, Wikipedia). After that it becomes the live stream.
+
+### Phones and tablets
+
+- One finger drag scrolls, a still tap clicks, a long press right-clicks.
+- Tapping a text field raises the phone keyboard automatically. The keyboard button in the toolbar raises it manually (for fields inside cross-origin iframes, where the server cannot tell what has focus).
+- The remote viewport is sized to your screen (down to 360 px wide), so responsive sites render their mobile layout instead of a shrunken desktop page.
+
+### Google "are you a human?" and corporate sign-in pages
+
+Run headed (`CHROME_HEADLESS=0`, the Docker default) with a persistent profile (`CHROME_USER_DATA`, the Docker volume). Headless Chromium plus a fresh profile is the combination that trips reCAPTCHA. With this pass, clicks reach the CAPTCHA iframe with a preceding hover, key events are real, and nothing is dropped during navigation, so the checkbox and the image challenges can be completed like in a local browser.
 
 ## Reverse proxy (later)
 

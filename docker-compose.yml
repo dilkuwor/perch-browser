@@ -1,6 +1,6 @@
 services:
   home-browser:
-    image: dilrecycle/home-browser:latest
+    image: dpksamir/home-browser:latest
     container_name: home-browser
     restart: unless-stopped
     pull_policy: always
@@ -15,6 +15,7 @@ services:
       CHROME_NO_SANDBOX: "1"
       CHROME_HEADLESS: "0"
       CHROME_USER_DATA: /data/chrome
+      JPEG_QUALITY: ${JPEG_QUALITY:-60}
     volumes:
       - chrome-profile:/data/chrome
     shm_size: "1gb"

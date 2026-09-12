@@ -398,6 +398,39 @@ body.is-focus .statusbar {
   background: #090b10;
   outline: none;
   overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.viewport.is-live {
+  cursor: default;
+}
+
+/* Off-screen textarea that receives phone/virtual keyboard input for the remote page. */
+.kbd {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  opacity: 0.01;
+  resize: none;
+  overflow: hidden;
+  font-size: 16px;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.viewport:not(.is-live) .kbd {
+  display: none;
 }
 
 .start-page {
@@ -535,6 +568,7 @@ body.is-focus .statusbar {
   display: none;
   user-select: none;
   pointer-events: none;
+  background: #fff;
 }
 
 .loading-page {
@@ -542,6 +576,7 @@ body.is-focus .statusbar {
   inset: 0;
   display: none;
   place-items: center;
+  text-align: center;
   color: var(--muted);
   font-size: 14px;
   letter-spacing: 0.02em;
@@ -554,6 +589,34 @@ body.is-focus .statusbar {
 
 .viewport.is-live.is-waiting .loading-page {
   display: grid;
+  z-index: 2;
+}
+
+.loading-page .loading-url {
+  display: block;
+  margin-top: 8px;
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: rgba(154, 163, 178, 0.7);
+}
+
+.loading-page .spinner {
+  width: 22px;
+  height: 22px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(110, 168, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .viewport.is-live .stream.has-frame {

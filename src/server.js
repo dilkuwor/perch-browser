@@ -122,6 +122,10 @@ app.use(express.static(path.join(__dirname, "..", "public"), {
   etag: true,
   maxAge: 0,
   index: "index.html",
+  setHeaders(res) {
+    // Always revalidate the shell so remote clients never run a stale app.js.
+    res.setHeader("Cache-Control", "no-cache");
+  },
 }));
 
 app.use((req, res) => {
@@ -129,11 +133,18 @@ app.use((req, res) => {
     res.status(404).json({ error: "Not found" });
     return;
   }
+  res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ noServer: true, clientTracking: true });
+const wss = new WebSocketServer({
+  noServer: true,
+  clientTracking: true,
+  // JPEG frames do not compress; skipping deflate saves CPU and latency.
+  perMessageDeflate: false,
+  maxPayload: 256 * 1024,
+});
 
 server.on("upgrade", (req, socket, head) => {
   const url = (req.url || "").split("?")[0];
@@ -171,7 +182,7 @@ wss.on("connection", (ws, req, session) => {
       return;
     }
     if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
-    const run = browser.handleInput(msg);
+    const run = browser.handleInput(msg, ws);
     if (run && typeof run.then === "function") {
       run.catch((err) => {
         console.error(`[home-browser] input error: ${err.message}`);
