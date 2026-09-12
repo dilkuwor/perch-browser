@@ -245,15 +245,6 @@ input {
   display: block;
 }
 
-.caps-hint {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: -6px 0 14px;
-  color: #febc2e;
-  font-size: 12px;
-}
-
 .login-foot {
   margin: 18px 0 0;
   color: var(--muted);

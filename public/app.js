@@ -295,7 +295,6 @@
 
   const loginCard = document.querySelector(".login-card");
   const togglePw = document.getElementById("toggle-pw");
-  const capsHint = document.getElementById("caps-hint");
   function showError(msg) {
     loginError.hidden = !msg;
     loginError.textContent = msg || "";
@@ -316,31 +315,6 @@
     togglePw.setAttribute("aria-label", show ? "Hide password" : "Show password");
     passwordInput.focus();
   });
-
-  // Infer Caps Lock from the actual character produced, not getModifierState("CapsLock"),
-  // which reports false positives on some desktop setups. A single letter that comes out
-  // uppercase without Shift (or lowercase with Shift) means Caps Lock is on. Non-letter
-  // keys tell us nothing, so they leave the hint unchanged.
-  function updateCaps(e) {
-    if (!capsHint) return;
-    const k = e.key;
-    if (!k || k.length !== 1) return;
-    const isUpper = k >= "A" && k <= "Z";
-    const isLower = k >= "a" && k <= "z";
-    if (!isUpper && !isLower) return;
-    const shift = typeof e.getModifierState === "function"
-      ? e.getModifierState("Shift")
-      : e.shiftKey;
-    capsHint.hidden = !((isUpper && !shift) || (isLower && shift));
-  }
-  // Only meaningful with a physical keyboard: on touch devices the soft keyboard
-  // auto-capitalizes the first letter, which would read as Caps Lock, so skip it there.
-  if (capsHint && !isTouchDevice) {
-    passwordInput.addEventListener("keydown", updateCaps);
-    passwordInput.addEventListener("blur", () => {
-      capsHint.hidden = true;
-    });
-  }
 
   function setStatus(text) {
     statusText.textContent = text;
@@ -584,7 +558,6 @@
         body: JSON.stringify({ password: passwordInput.value }),
       });
       passwordInput.value = "";
-      if (capsHint) capsHint.hidden = true;
       const data = await api("/api/ip");
       enterApp(data.egress_ip);
     } catch (err) {
