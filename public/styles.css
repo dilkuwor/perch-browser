@@ -86,7 +86,11 @@ input {
 .login-mark {
   display: grid;
   place-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.login-mark svg {
+  filter: drop-shadow(0 12px 26px rgba(110, 123, 255, 0.35));
 }
 
 .brand {
