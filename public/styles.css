@@ -56,20 +56,46 @@ input {
   place-items: center;
   padding: 24px;
   position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  /* Premium near-black navy base with two soft ambient glows: deep blue from the
+     upper-right, indigo/purple from the upper-left. Large radii + low alpha keep the
+     falloff smooth (no banding), and the centre stays dark so the card reads clearly. */
+  background:
+    radial-gradient(1150px 820px at 86% -14%, rgba(42, 98, 212, 0.32), transparent 58%),
+    radial-gradient(1040px 760px at 6% -10%, rgba(104, 78, 202, 0.20), transparent 56%),
+    radial-gradient(900px 640px at 50% 116%, rgba(30, 46, 104, 0.16), transparent 60%),
+    var(--login-bg, #050814);
+}
+
+/* A gentle vignette to deepen the far corners — cinematic, but subtle enough to keep
+   contrast and never crush the ambient glows. */
+.login-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(1300px 980px at 50% 40%, transparent 62%, rgba(2, 4, 12, 0.55));
 }
 
 .login-screen[hidden] {
   display: none;
 }
 
+/* Soft radial glow sitting directly behind the login card, tying the light to it. */
 .login-glow {
   position: absolute;
-  width: 420px;
-  height: 420px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, 92vw);
+  height: min(560px, 92vw);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(110, 168, 255, 0.18), transparent 68%);
-  filter: blur(8px);
+  background: radial-gradient(circle, rgba(96, 132, 240, 0.20), transparent 70%);
+  filter: blur(24px);
   pointer-events: none;
+  z-index: -1;
 }
 
 .login-card {
