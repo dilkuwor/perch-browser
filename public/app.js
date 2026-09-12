@@ -15,7 +15,15 @@
   const omniboxForm = document.getElementById("omnibox-form");
   const startSearch = document.getElementById("start-search");
   const startQ = document.getElementById("start-q");
-  const tabTitle = document.getElementById("tab-title");
+  const tabsEl = document.getElementById("tabs");
+  const btnNewTab = document.getElementById("btn-newtab");
+  const btnLatency = document.getElementById("btn-latency");
+  const latencyDot = document.getElementById("latency-dot");
+  const latencyPanel = document.getElementById("latency-panel");
+  const latRtt = document.getElementById("lat-rtt");
+  const latFps = document.getElementById("lat-fps");
+  const latBw = document.getElementById("lat-bw");
+  const latSize = document.getElementById("lat-size");
   const statusText = document.getElementById("status-text");
   const wsDot = document.getElementById("ws-dot");
   const ipChip = document.getElementById("ip-chip");
@@ -72,7 +80,199 @@
     touch: null,
     kbdPrev: "",
     kbdWanted: false,
+    tabs: [],
+    activeTab: null,
+    tabsUnsupported: false,
+    latencyTimer: null,
+    rtt: null,
+    statFrames: 0,
+    statBytes: 0,
+    statAt: 0,
   };
+
+  // ——— tabs ———
+
+  function setTabTitle(text) {
+    const el = tabsEl.querySelector(".tab.active .tab-title");
+    if (el) el.textContent = text;
+  }
+
+  // A single placeholder so the strip is never empty before the server list arrives.
+  function seedTabs() {
+    if (state.tabs.length) return;
+    renderTabs([{ id: "local", url: "about:blank", title: "New Tab", active: true }], "local");
+  }
+
+  // Belt-and-suspenders: the tab list normally arrives as a WebSocket push, but fetch it
+  // over HTTP too so a missed push (or a proxy that drops the message) still fills the strip.
+  async function refreshTabs() {
+    try {
+      const data = await api("/api/tabs");
+      if (data && Array.isArray(data.tabs)) renderTabs(data.tabs, data.active);
+    } catch (err) {
+      // An old server without /api/tabs: keep the placeholder rather than blanking the strip.
+      if (err && err.status === 404) {
+        markTabsUnsupported();
+        seedTabs();
+      }
+    }
+  }
+
+  function renderTabs(tabs, active) {
+    // Never blank the strip on an empty/failed list; keep what is already shown.
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      seedTabs();
+      return;
+    }
+    state.tabs = tabs;
+    state.activeTab = active || (tabs.find((t) => t.active) || {}).id || null;
+    tabsEl.textContent = "";
+    for (const tab of state.tabs) {
+      const el = document.createElement("div");
+      el.className = "tab" + (tab.id === state.activeTab ? " active" : "");
+      el.setAttribute("role", "tab");
+      el.dataset.id = tab.id;
+      el.title = tab.url || "";
+      const dot = document.createElement("span");
+      dot.className = "tab-favicon";
+      const title = document.createElement("span");
+      title.className = "tab-title";
+      title.textContent = tab.title || tab.url || "New Tab";
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "tab-close";
+      close.setAttribute("aria-label", "Close tab");
+      close.textContent = "×";
+      close.addEventListener("click", (e) => {
+        e.stopPropagation();
+        tabAction("close", tab.id);
+      });
+      el.appendChild(dot);
+      el.appendChild(title);
+      el.appendChild(close);
+      el.addEventListener("click", () => {
+        if (tab.id !== state.activeTab) tabAction("switch", tab.id);
+      });
+      el.addEventListener("auxclick", (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          tabAction("close", tab.id);
+        }
+      });
+      tabsEl.appendChild(el);
+    }
+    const activeEl = tabsEl.querySelector(".tab.active");
+    if (activeEl && activeEl.scrollIntoView) activeEl.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  // Old server without tab support: say so loudly and once, not a silent flash.
+  function markTabsUnsupported() {
+    if (state.tabsUnsupported) return;
+    state.tabsUnsupported = true;
+    btnNewTab.title = "Tabs need a newer server — restart / redeploy it";
+    btnNewTab.classList.add("is-stale");
+    flashStatus("This server is out of date — restart it to enable tabs.", 8000);
+    console.warn("[home-browser] /api/tab is missing; the running server is an older build.");
+  }
+
+  async function tabAction(action, id, url) {
+    if (!id || id === "local") {
+      // The seeded placeholder has no real server id; only "new" is meaningful on it.
+      if (action !== "new") return;
+    }
+    try {
+      const meta = await api("/api/tab", {
+        method: "POST",
+        body: JSON.stringify({ action, id, url }),
+      });
+      if (meta && meta.url === "about:blank") setLive(false);
+      else if (meta) applyMeta(meta);
+      state.tabsUnsupported = false;
+      btnNewTab.classList.remove("is-stale");
+      refreshTabs();
+    } catch (err) {
+      if (err && err.status === 404) markTabsUnsupported();
+      else flashStatus(err.message || "Tab action failed");
+    }
+    viewport.focus();
+  }
+
+  btnNewTab.addEventListener("click", () => tabAction("new"));
+
+  // ——— latency ———
+
+  function fmtBytes(perSec) {
+    if (perSec >= 1024 * 1024) return `${(perSec / (1024 * 1024)).toFixed(1)} MB/s`;
+    if (perSec >= 1024) return `${Math.round(perSec / 1024)} KB/s`;
+    return `${Math.round(perSec)} B/s`;
+  }
+
+  function renderLatency() {
+    const now = performance.now();
+    const secs = Math.max(0.001, (now - state.statAt) / 1000);
+    const fps = state.statFrames / secs;
+    const bw = state.statBytes / secs;
+    state.statFrames = 0;
+    state.statBytes = 0;
+    state.statAt = now;
+    latRtt.textContent = state.rtt == null ? "…" : `${Math.round(state.rtt)} ms`;
+    latFps.textContent = `${fps < 10 ? fps.toFixed(1) : Math.round(fps)} fps`;
+    latBw.textContent = fmtBytes(bw);
+    latSize.textContent = `${state.frameW} × ${state.frameH}`;
+    latencyDot.className = "latency-dot";
+    if (state.rtt != null) {
+      latencyDot.classList.add(state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor");
+    }
+    btnLatency.title = state.rtt == null ? "Latency" : `Latency: ${Math.round(state.rtt)} ms`;
+  }
+
+  function sendPing() {
+    sendWs({ type: "ping", t: performance.now() });
+  }
+
+  function startLatency() {
+    if (state.latencyTimer) return;
+    state.statFrames = 0;
+    state.statBytes = 0;
+    state.statAt = performance.now();
+    sendPing();
+    state.latencyTimer = setInterval(() => {
+      sendPing();
+      renderLatency();
+    }, 1000);
+  }
+
+  function stopLatency() {
+    clearInterval(state.latencyTimer);
+    state.latencyTimer = null;
+  }
+
+  function toggleLatency(show) {
+    const on = show == null ? latencyPanel.hidden : show;
+    latencyPanel.hidden = !on;
+    btnLatency.classList.toggle("is-on", on);
+    if (on) {
+      renderLatency();
+      startLatency();
+    }
+  }
+
+  btnLatency.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleLatency();
+  });
+
+  document.addEventListener("mousedown", (e) => {
+    if (latencyPanel.hidden) return;
+    if (latencyPanel.contains(e.target) || btnLatency.contains(e.target)) return;
+    toggleLatency(false);
+  });
+
+  // Keep a cheap background ping so the dot on the icon stays meaningful.
+  setInterval(() => {
+    if (!latencyPanel.hidden || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+    sendPing();
+  }, 5000);
 
   function resolveUrl(input) {
     const raw = String(input || "").trim();
@@ -156,7 +356,7 @@
       stream.classList.remove("has-frame");
       state.pendingFrame = null;
       clearCanvas();
-      tabTitle.textContent = "New Tab";
+      setTabTitle("New Tab");
       address.value = "";
       setStatus("Start page");
       document.title = "Home Browser — bytetech.cloud";
@@ -170,7 +370,7 @@
     state.live = true;
     state.minEpoch = state.epoch + 1;
     address.value = url || address.value;
-    tabTitle.textContent = "Loading…";
+    setTabTitle("Loading…");
     setStatus(label || "Loading…");
     showLoading(label || "Loading remote page…", url);
   }
@@ -246,6 +446,8 @@
   function onBinaryFrame(buf) {
     const header = decodeHeader(buf);
     if (!header) return;
+    state.statFrames += 1;
+    state.statBytes += buf.byteLength;
     if (header.epoch < state.minEpoch) return;
     if (header.epoch > state.epoch) state.epoch = header.epoch;
     state.frameW = header.width || state.frameW;
@@ -304,8 +506,10 @@
     appScreen.hidden = false;
     if (egressIp) ipChip.textContent = `IP · ${egressIp}`;
     setLive(false);
+    seedTabs();
     connectSocket();
     refreshIp();
+    refreshTabs();
     sendResize();
     viewport.focus();
   }
@@ -364,7 +568,7 @@
       document.title = `${meta.title || "Home Browser"} — bytetech.cloud`;
     }
     if (meta.title && !(viewport.classList.contains("is-waiting") && meta.title === meta.url)) {
-      tabTitle.textContent = meta.title;
+      setTabTitle(meta.title);
     }
   }
 
@@ -554,10 +758,26 @@
         }
         state.live = true;
         showLoading("Loading remote page…", msg.url || "");
+        if (msg.url === "about:blank") {
+          setLive(false);
+          return;
+        }
         if (msg.url && document.activeElement !== address) address.value = msg.url;
-        tabTitle.textContent = "Loading…";
+        setTabTitle("Loading…");
         setStatus("Loading…");
         blurKbd();
+        return;
+      }
+      if (msg.type === "tabs") {
+        renderTabs(msg.tabs, msg.active);
+        return;
+      }
+      if (msg.type === "pong") {
+        if (typeof msg.t === "number") {
+          state.rtt = performance.now() - msg.t;
+          latencyDot.className = "latency-dot " + (state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor");
+          btnLatency.title = `Latency: ${Math.round(state.rtt)} ms`;
+        }
         return;
       }
       if (msg.type === "meta") {
@@ -566,7 +786,7 @@
         if (state.live) applyMeta(msg);
         return;
       }
-      if (msg.type === "status" && msg.text) {
+        if (msg.type === "status" && msg.text) {
         flashStatus(String(msg.text).slice(0, 160), 5000);
         return;
       }

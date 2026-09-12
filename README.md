@@ -124,6 +124,14 @@ Keyboard input is delivered as real `keyDown` / `keyUp` events (with `text` for 
 
 Until the first real navigation, the viewport shows the new-tab start page (Google, YouTube, Find my IP, Wikipedia). After that it becomes the live stream.
 
+### Tabs
+
+The title bar is a real tab strip. **+** opens a new tab (it shows the start page), clicking a tab switches to it, and **×** (or a middle-click) closes it. Closing the last tab opens a fresh blank one so the browser is never left without a page. Because there is a single shared Chromium, everyone signed in sees and controls the same set of tabs. Links that open a new tab or window (SSO sign-in, `target=_blank`) appear in the strip and take over the view; closing such a tab returns you to the one that opened it.
+
+### Latency
+
+The chart icon next to Focus mode opens a small panel with the live connection stats: round-trip time to the home server, frames per second, bandwidth, and the remote viewport size. The dot on the icon is green under ~80 ms, amber under ~200 ms, red above. Use it to tell an unresponsive site apart from a slow link.
+
 ### Phones and tablets
 
 - One finger drag scrolls, a still tap clicks, a long press right-clicks.

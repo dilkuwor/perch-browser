@@ -15,6 +15,9 @@ const APP_USER = process.env.APP_USER || "admin";
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT) || 8080;
 const HOME_URL = process.env.HOME_URL || "https://www.google.com/";
+// Bumped whenever the server protocol changes; lets a client confirm it is not talking
+// to an older process. Tabs + binary screencast landed in build 2.
+const BUILD = 2;
 
 if (!APP_PASSWORD) {
   console.error("Refusing to start: APP_PASSWORD is missing.");
@@ -41,6 +44,8 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     status: "ok",
+    build: BUILD,
+    features: ["tabs", "binary-frames", "latency"],
     chromium: browser.ready,
     user: APP_USER,
   });
@@ -118,13 +123,41 @@ app.post("/api/action", auth.requireAuth.bind(auth), async (req, res) => {
   }
 });
 
+app.get("/api/tabs", auth.requireAuth.bind(auth), async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await browser.listTabs()) });
+  } catch (err) {
+    res.status(503).json({ error: err.message || "Tabs unavailable" });
+  }
+});
+
+app.post("/api/tab", auth.requireAuth.bind(auth), async (req, res) => {
+  const body = req.body || {};
+  const action = body.action;
+  const id = typeof body.id === "string" ? body.id : "";
+  try {
+    let meta;
+    if (action === "new") meta = await browser.newTab(typeof body.url === "string" ? body.url : "");
+    else if (action === "switch" && id) meta = await browser.switchTab(id);
+    else if (action === "close" && id) meta = await browser.closeTab(id);
+    else {
+      res.status(400).json({ error: "action must be new, switch or close (with id)" });
+      return;
+    }
+    res.json({ ok: true, ...meta });
+  } catch (err) {
+    res.status(503).json({ error: err.message || "Tab action failed" });
+  }
+});
+
 app.use(express.static(path.join(__dirname, "..", "public"), {
   etag: true,
   maxAge: 0,
   index: "index.html",
   setHeaders(res) {
-    // Always revalidate the shell so remote clients never run a stale app.js.
-    res.setHeader("Cache-Control", "no-cache");
+    // no-store, not no-cache: some phones and reverse proxies keep serving a cached
+    // app.js under no-cache. no-store guarantees a fresh client on every load.
+    res.setHeader("Cache-Control", "no-store, must-revalidate");
   },
 }));
 
@@ -133,7 +166,7 @@ app.use((req, res) => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-store, must-revalidate");
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
@@ -182,6 +215,15 @@ wss.on("connection", (ws, req, session) => {
       return;
     }
     if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
+    if (msg.type === "ping") {
+      // Latency probe: echo the client's timestamp straight back.
+      try {
+        ws.send(JSON.stringify({ type: "pong", t: msg.t }));
+      } catch {
+        // ignore
+      }
+      return;
+    }
     const run = browser.handleInput(msg, ws);
     if (run && typeof run.then === "function") {
       run.catch((err) => {

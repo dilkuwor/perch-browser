@@ -354,6 +354,11 @@ class HomeBrowser {
     this._uaOverride = null;
     this._pendingUrl = "";
     this._lastMouse = { x: -1, y: -1 };
+    this._tabIds = new WeakMap();
+    this._tabSeq = 0;
+    this._tabsTimer = null;
+    this._adoptChain = Promise.resolve();
+    this._lastActive = null;
   }
 
   get ready() {
@@ -540,6 +545,127 @@ class HomeBrowser {
         console.error(`[home-browser] adopt page failed: ${err.message}`);
       });
     });
+    this.browser.on("targetdestroyed", () => this._scheduleTabs());
+    this.browser.on("targetchanged", () => this._scheduleTabs());
+  }
+
+  // ——— tabs ———
+
+  _tabId(page) {
+    let id = this._tabIds.get(page);
+    if (!id) {
+      this._tabSeq += 1;
+      id = `t${this._tabSeq}`;
+      this._tabIds.set(page, id);
+    }
+    return id;
+  }
+
+  async _openPages() {
+    if (!this.browser) return [];
+    try {
+      return (await this.browser.pages()).filter((p) => !p.isClosed());
+    } catch {
+      return [];
+    }
+  }
+
+  async _pageById(id) {
+    const pages = await this._openPages();
+    return pages.find((p) => this._tabId(p) === id) || null;
+  }
+
+  async listTabs() {
+    const pages = await this._openPages();
+    const tabs = await Promise.all(
+      pages.map(async (p) => {
+        let url = "about:blank";
+        try {
+          url = p.url() || url;
+        } catch {
+          // ignore
+        }
+        let title = "";
+        if (p === this.page) {
+          // The active page already has fresh meta; do not evaluate against it mid-load.
+          url = this.lastMeta.url;
+          title = this.lastMeta.title;
+        } else {
+          // Chrome's cached target title is unreliable for background pages, so read the
+          // document title directly (short timeout so a hung tab never stalls the list).
+          try {
+            title = (await withTimeout(p.title(), 700, "")) || "";
+          } catch {
+            // ignore
+          }
+        }
+        if (!title || title === url) {
+          if (url === "about:blank") title = "New Tab";
+          else {
+            try {
+              title = new URL(url).hostname || url;
+            } catch {
+              title = url;
+            }
+          }
+        }
+        return { id: this._tabId(p), url, title, active: p === this.page };
+      })
+    );
+    return { tabs, active: this.page ? this._tabId(this.page) : null };
+  }
+
+  _scheduleTabs() {
+    if (this._tabsTimer || this.closed) return;
+    this._tabsTimer = setTimeout(() => {
+      this._tabsTimer = null;
+      this._broadcastTabs().catch(() => {});
+    }, 150);
+  }
+
+  async _broadcastTabs(only) {
+    if (!this.browser) return;
+    const payload = JSON.stringify({ type: "tabs", ...(await this.listTabs()) });
+    for (const ws of only ? [only] : this.clients) {
+      if (ws.readyState === 1) {
+        try {
+          ws.send(payload);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  async newTab(rawUrl) {
+    await this.ensure();
+    const href = rawUrl ? assertAllowedUrl(resolveUrl(rawUrl, this.homeUrl)) : "";
+    const page = await this.browser.newPage();
+    await this._adoptPage(page);
+    if (href) return this._navigateTo(href);
+    return this._sendMeta(true);
+  }
+
+  async switchTab(id) {
+    await this.ensure();
+    const page = await this._pageById(id);
+    if (!page) throw new Error("No such tab");
+    if (page !== this.page) await this._adoptPage(page);
+    return this._sendMeta(true);
+  }
+
+  async closeTab(id) {
+    await this.ensure();
+    const page = await this._pageById(id);
+    if (!page) throw new Error("No such tab");
+    const pages = await this._openPages();
+    if (pages.length === 1) {
+      // Never leave the browser without a tab: open a fresh one first, it becomes the view.
+      await this.browser.newPage();
+    }
+    await page.close().catch(() => {});
+    this._scheduleTabs();
+    return this._sendMeta(true);
   }
 
   _unbindPage(page) {
@@ -549,13 +675,26 @@ class HomeBrowser {
     }
   }
 
-  async _adoptPage(page) {
+  // View switches are serialized: newTab() and the targetcreated listener may both ask
+  // to adopt the same page, and the second request must become a no-op.
+  _adoptPage(page) {
+    const run = () => this._doAdopt(page);
+    this._adoptChain = this._adoptChain.then(run, run);
+    return this._adoptChain;
+  }
+
+  async _doAdopt(page) {
+    if (this.closed || !page || page.isClosed() || page === this.page) return;
     const previous = this.page;
-    if (previous && previous !== page) this._unbindPage(previous);
+    if (previous && previous !== page) {
+      this._unbindPage(previous);
+      this._lastActive = previous;
+    }
     this._beginNav(page.url());
     await this._bindPage(page);
     this._commitDone();
     await this._sendMeta(true);
+    this._scheduleTabs();
   }
 
   async _bindPage(page) {
@@ -633,7 +772,9 @@ class HomeBrowser {
     try {
       const pages = await this.browser.pages();
       const open = pages.filter((p) => p !== closedPage && !p.isClosed());
-      next = open[open.length - 1] || null;
+      // Prefer the tab that was active before this one (the opener of a popup).
+      if (this._lastActive && open.includes(this._lastActive)) next = this._lastActive;
+      else next = open[open.length - 1] || null;
     } catch {
       // ignore
     }
@@ -798,7 +939,7 @@ class HomeBrowser {
     } catch {
       // ignore
     }
-    if (this._commitPending && this._pendingUrl) {
+    if (this._commitPending && this._pendingUrl && this._pendingUrl !== "about:blank") {
       // The new document has not committed yet: report where we are going, not where we were.
       url = this._pendingUrl;
       title = "Loading…";
@@ -820,6 +961,7 @@ class HomeBrowser {
       url !== this.lastMeta.url || title !== this.lastMeta.title || this.epoch !== this.lastMeta.epoch;
     this.lastMeta = { url, title, epoch: this.epoch };
     if (force || changed) this.broadcast({ type: "meta", ...this.lastMeta });
+    if (changed) this._scheduleTabs();
     return this.lastMeta;
   }
 
@@ -834,6 +976,7 @@ class HomeBrowser {
     }
     this.ensure()
       .then(async () => {
+        await this._broadcastTabs(ws);
         await this._startScreencast();
         await this._snapshot(ws);
       })
@@ -1181,6 +1324,10 @@ class HomeBrowser {
     if (this._metaTimer) {
       clearTimeout(this._metaTimer);
       this._metaTimer = null;
+    }
+    if (this._tabsTimer) {
+      clearTimeout(this._tabsTimer);
+      this._tabsTimer = null;
     }
     for (const ws of this.clients) {
       try {
