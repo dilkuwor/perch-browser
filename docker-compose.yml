@@ -1,7 +1,7 @@
 services:
-  home-browser:
-    image: dpksamir/home-browser:latest
-    container_name: home-browser
+  perch-browser:
+    image: dpksamir/perch-browser:latest
+    container_name: perch-browser
     restart: unless-stopped
     pull_policy: always
     ports:

@@ -4,7 +4,7 @@
 
 This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>` of google.com (that is blocked by almost every site). It is a real remote Chromium — your own vantage on the web, kept at home.
 
-> The npm package and Docker image are still named `home-browser`; **Perch** is the product name.
+> The npm package is named `home-browser`; the Docker image is `perch-browser`; **Perch** is the product name.
 
 Single Chromium session: there is one browser process. A second login uses (and can take over) that same session — same cookies, same tab, same page.
 
@@ -12,13 +12,65 @@ Later you can expose it at `https://vpn.bytetech.cloud` or `https://rdp.bytetech
 
 ## Requirements
 
-- Node.js 20+
-- Google Chrome or Chromium installed on the home server
+- Docker & Docker Compose (recommended), OR Node.js 20+ with Google Chrome/Chromium
 - A long password (12+ characters) in `.env`
 
-No Docker, no Postgres, no compose files in this pass.
+## Run with Docker (Recommended)
 
-## Install (Ubuntu / Debian)
+### Using Docker Compose
+
+1. Prepare your `.env` configuration:
+   ```bash
+   cp .env.example .env
+   nano .env                     # set APP_PASSWORD to 12+ characters
+   ```
+
+2. Start the container in detached mode:
+   ```bash
+   docker compose up -d
+   ```
+
+3. Follow the logs:
+   ```bash
+   docker compose logs -f
+   ```
+
+To stop:
+```bash
+docker compose down
+```
+
+### Using `docker run` directly
+
+```bash
+docker volume create perch-chrome-profile
+
+docker run -d \
+  --name perch-browser \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -e APP_PASSWORD="choose-a-long-password" \
+  -e APP_USER="admin" \
+  -v perch-chrome-profile:/data/chrome \
+  --shm-size="1gb" \
+  dpksamir/perch-browser:latest
+```
+
+### Build and run from local Dockerfile
+
+```bash
+docker build -t perch-browser .
+docker run -d \
+  --name perch-browser \
+  -p 8080:8080 \
+  -e APP_PASSWORD="choose-a-long-password" \
+  --shm-size="1gb" \
+  perch-browser
+```
+
+## Run natively (Ubuntu / Debian)
+
+### 1. Install dependencies
 
 ```bash
 # Node 20+
@@ -37,7 +89,7 @@ node -v          # v20 or newer
 which chromium || which chromium-browser || which google-chrome-stable
 ```
 
-## Configure and run
+### 2. Configure and run
 
 From this repo on the **home server**:
 
