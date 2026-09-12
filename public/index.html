@@ -10,6 +10,45 @@
 </head>
 <body>
   <div id="login-screen" class="screen login-screen">
+    <svg class="login-bg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="perch-streak-a" x1="1" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#9cbcff" />
+          <stop offset="0.5" stop-color="#5b7dff" />
+          <stop offset="1" stop-color="#3a56d8" stop-opacity="0.15" />
+        </linearGradient>
+        <linearGradient id="perch-streak-b" x1="0" y1="0" x2="1" y2="0.35">
+          <stop offset="0" stop-color="#7a5cff" stop-opacity="0.08" />
+          <stop offset="0.45" stop-color="#7d6bff" />
+          <stop offset="1" stop-color="#5b8cff" />
+        </linearGradient>
+        <radialGradient id="perch-limb" cx="1" cy="0.52" r="0.6">
+          <stop offset="0" stop-color="#6b90ff" stop-opacity="0.62" />
+          <stop offset="0.45" stop-color="#3f5fd8" stop-opacity="0.18" />
+          <stop offset="1" stop-color="#000000" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="perch-neb" cx="0.12" cy="0.2" r="0.5">
+          <stop offset="0" stop-color="#6d5cff" stop-opacity="0.18" />
+          <stop offset="1" stop-color="#000000" stop-opacity="0" />
+        </radialGradient>
+        <filter id="perch-soft" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="24" />
+        </filter>
+        <filter id="perch-sharp" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="9" />
+        </filter>
+      </defs>
+      <rect x="0" y="0" width="1600" height="900" fill="url(#perch-neb)" />
+      <rect x="760" y="0" width="840" height="900" fill="url(#perch-limb)" />
+      <g fill="none" filter="url(#perch-soft)">
+        <ellipse cx="1600" cy="450" rx="360" ry="620" stroke="url(#perch-streak-a)" stroke-width="34" opacity="0.85" />
+        <path d="M-180,620 C240,660 520,520 920,600 C1080,632 1180,690 1320,760" stroke="url(#perch-streak-b)" stroke-width="22" stroke-linecap="round" opacity="0.7" />
+      </g>
+      <g fill="none" filter="url(#perch-sharp)">
+        <ellipse cx="1600" cy="450" rx="360" ry="620" stroke="#c6d8ff" stroke-width="4" opacity="0.6" />
+        <path d="M-180,620 C240,660 520,520 920,600 C1080,632 1180,690 1320,760" stroke="#cdd9ff" stroke-width="2.5" stroke-linecap="round" opacity="0.42" />
+      </g>
+    </svg>
     <div class="login-glow" aria-hidden="true"></div>
     <div class="login-card">
       <div class="login-mark" aria-hidden="true">

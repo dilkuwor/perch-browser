@@ -62,10 +62,19 @@ input {
      upper-right, indigo/purple from the upper-left. Large radii + low alpha keep the
      falloff smooth (no banding), and the centre stays dark so the card reads clearly. */
   background:
-    radial-gradient(1150px 820px at 86% -14%, rgba(42, 98, 212, 0.32), transparent 58%),
-    radial-gradient(1040px 760px at 6% -10%, rgba(104, 78, 202, 0.20), transparent 56%),
-    radial-gradient(900px 640px at 50% 116%, rgba(30, 46, 104, 0.16), transparent 60%),
-    var(--login-bg, #050814);
+    radial-gradient(1200px 900px at 88% 52%, rgba(40, 80, 200, 0.12), transparent 55%),
+    radial-gradient(900px 820px at 4% 84%, rgba(96, 64, 200, 0.10), transparent 55%),
+    linear-gradient(160deg, #070b1a 0%, #04060f 55%, #05060e 100%);
+}
+
+/* Flowing light-streak backdrop (blurred inline SVG), sitting behind everything. */
+.login-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -3;
+  pointer-events: none;
 }
 
 /* A gentle vignette to deepen the far corners — cinematic, but subtle enough to keep
@@ -74,9 +83,9 @@ input {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: -2;
   pointer-events: none;
-  background: radial-gradient(1300px 980px at 50% 40%, transparent 62%, rgba(2, 4, 12, 0.55));
+  background: radial-gradient(1300px 980px at 50% 42%, transparent 60%, rgba(2, 4, 12, 0.55));
 }
 
 .login-screen[hidden] {
@@ -100,13 +109,28 @@ input {
 
 .login-card {
   position: relative;
+  z-index: 1;
   width: min(420px, 100%);
-  background: linear-gradient(180deg, rgba(18, 22, 31, 0.96), rgba(13, 16, 22, 0.96));
-  border: 1px solid var(--line-strong);
-  border-radius: 20px;
-  padding: 36px 32px 32px;
-  box-shadow: var(--shadow);
+  /* Frosted glass: translucent so the light streaks bleed softly through the edges,
+     a bright inset top edge, and a deep soft shadow to lift it off the scene. */
+  background: linear-gradient(180deg, rgba(30, 37, 56, 0.55), rgba(14, 18, 30, 0.48));
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 24px;
+  padding: 36px 32px 30px;
+  box-shadow:
+    0 44px 100px rgba(2, 6, 20, 0.62),
+    0 2px 10px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
   text-align: center;
+}
+
+/* Fallback for engines without backdrop-filter: keep the card solid enough to read. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .login-card {
+    background: linear-gradient(180deg, rgba(22, 27, 42, 0.94), rgba(12, 15, 25, 0.94));
+  }
 }
 
 .login-mark {
@@ -172,8 +196,8 @@ input {
   width: 100%;
   height: 46px;
   border-radius: 12px;
-  border: 1px solid var(--line-strong);
-  background: #0a0d12;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 11, 20, 0.55);
   color: var(--text);
   padding: 0 44px 0 38px;
   font-size: 15px;
