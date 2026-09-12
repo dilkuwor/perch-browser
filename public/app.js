@@ -290,10 +290,39 @@
     return `https://${raw}`;
   }
 
+  const loginCard = document.querySelector(".login-card");
+  const togglePw = document.getElementById("toggle-pw");
+  const capsHint = document.getElementById("caps-hint");
   function showError(msg) {
     loginError.hidden = !msg;
     loginError.textContent = msg || "";
+    if (msg && loginCard) {
+      loginCard.classList.remove("shake");
+      // reflow so the animation restarts on repeated failures
+      void loginCard.offsetWidth;
+      loginCard.classList.add("shake");
+    }
   }
+
+  // Show / hide the password, useful for long passwords typed on a phone.
+  togglePw.addEventListener("click", () => {
+    const show = passwordInput.type === "password";
+    passwordInput.type = show ? "text" : "password";
+    togglePw.classList.toggle("is-on", show);
+    togglePw.setAttribute("aria-pressed", String(show));
+    togglePw.setAttribute("aria-label", show ? "Hide password" : "Show password");
+    passwordInput.focus();
+  });
+
+  function updateCaps(e) {
+    if (!capsHint || typeof e.getModifierState !== "function") return;
+    capsHint.hidden = !e.getModifierState("CapsLock");
+  }
+  passwordInput.addEventListener("keydown", updateCaps);
+  passwordInput.addEventListener("keyup", updateCaps);
+  passwordInput.addEventListener("blur", () => {
+    if (capsHint) capsHint.hidden = true;
+  });
 
   function setStatus(text) {
     statusText.textContent = text;
@@ -527,20 +556,29 @@
     e.preventDefault();
     showError("");
     loginBtn.disabled = true;
+    loginBtn.classList.add("is-loading");
+    const label = loginBtn.querySelector(".btn-label");
+    const prevLabel = label ? label.textContent : "";
+    if (label) label.textContent = "Signing in…";
     try {
       await api("/api/login", {
         method: "POST",
         body: JSON.stringify({ password: passwordInput.value }),
       });
       passwordInput.value = "";
+      if (capsHint) capsHint.hidden = true;
       const data = await api("/api/ip");
       enterApp(data.egress_ip);
     } catch (err) {
       showError(err.status === 429
         ? "Too many attempts. Wait a few minutes."
         : (err.message || "Invalid credentials"));
+      passwordInput.focus();
+      passwordInput.select();
     } finally {
       loginBtn.disabled = false;
+      loginBtn.classList.remove("is-loading");
+      if (label) label.textContent = prevLabel || "Sign in";
     }
   });
 

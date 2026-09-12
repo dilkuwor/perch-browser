@@ -129,16 +129,87 @@ input {
   margin-bottom: 6px;
 }
 
+.field-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.field-lock {
+  position: absolute;
+  left: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
 .field input {
   width: 100%;
-  height: 44px;
+  height: 46px;
   border-radius: 12px;
   border: 1px solid var(--line-strong);
   background: #0a0d12;
   color: var(--text);
-  padding: 0 14px;
+  padding: 0 44px 0 38px;
   font-size: 15px;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field-toggle {
+  position: absolute;
+  right: 6px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.field-toggle:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.field-toggle.is-on {
+  color: var(--accent);
+}
+
+/* Show exactly one eye: open by default, crossed-out when the password is revealed. */
+.field-toggle svg {
+  grid-area: 1 / 1;
+}
+
+.field-toggle .eye-closed {
+  display: none;
+}
+
+.field-toggle.is-on .eye-open {
+  display: none;
+}
+
+.field-toggle.is-on .eye-closed {
+  display: block;
+}
+
+.caps-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: -6px 0 14px;
+  color: #febc2e;
+  font-size: 12px;
+}
+
+.login-foot {
+  margin: 18px 0 0;
+  color: var(--muted);
+  opacity: 0.7;
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 .field input:focus {
@@ -147,8 +218,9 @@ input {
 }
 
 .primary-btn {
+  position: relative;
   width: 100%;
-  height: 44px;
+  height: 46px;
   border: 0;
   border-radius: 12px;
   background: linear-gradient(180deg, #7eb4ff, #5b96f0);
@@ -156,6 +228,25 @@ input {
   font-weight: 650;
   font-size: 15px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: filter 0.15s ease;
+}
+
+.btn-spinner {
+  display: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(7, 16, 24, 0.35);
+  border-top-color: #071018;
+  animation: spin 0.7s linear infinite;
+}
+
+.primary-btn.is-loading .btn-spinner {
+  display: block;
 }
 
 .primary-btn:hover {
@@ -171,6 +262,34 @@ input {
   margin: 12px 0 0;
   color: var(--danger);
   font-size: 13px;
+}
+
+.login-card.shake {
+  animation: card-shake 0.4s ease;
+}
+
+@keyframes card-shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-7px); }
+  40%, 60% { transform: translateX(7px); }
+}
+
+.login-screen .login-card {
+  animation: card-in 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-screen .login-card,
+  .login-card.shake,
+  .btn-spinner {
+    animation: none;
+  }
 }
 
 /* ——— App / window ——— */
