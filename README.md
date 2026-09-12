@@ -6,6 +6,18 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 
 > The npm package is named `home-browser`; the Docker image is `perch-browser`; **Perch** is the product name.
 
+## Screenshots
+
+**Sign in** — password-only, single session. The host name shown reflects wherever you open it.
+
+![Perch login screen](docs/screenshot-login.png)
+
+**The browser** — real tabs, an address bar with speed dials, and the home server's live egress IP in the status bar.
+
+![Perch browser UI](docs/screenshot-app.png)
+
+## Overview
+
 Single Chromium session: there is one browser process. A second login uses (and can take over) that same session — same cookies, same tab, same page.
 
 Later you can expose it at `https://vpn.bytetech.cloud` or `https://rdp.bytetech.cloud` behind Caddy or Nginx. The reverse proxy **must** forward WebSocket `Upgrade` headers.
