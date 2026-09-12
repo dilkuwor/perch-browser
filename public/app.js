@@ -56,6 +56,9 @@
   const LONG_PRESS_MS = 550;
 
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+  // The instance identity shown around the UI: whatever host this page was opened on
+  // (perch.example.com, a LAN IP, localhost, ...) rather than a hardcoded domain.
+  const HOST_LABEL = location.hostname || "this device";
   const ctx = stream.getContext("2d", { alpha: false, desynchronized: true }) || stream.getContext("2d");
 
   const state = {
@@ -318,11 +321,16 @@
     if (!capsHint || typeof e.getModifierState !== "function") return;
     capsHint.hidden = !e.getModifierState("CapsLock");
   }
-  passwordInput.addEventListener("keydown", updateCaps);
-  passwordInput.addEventListener("keyup", updateCaps);
-  passwordInput.addEventListener("blur", () => {
-    if (capsHint) capsHint.hidden = true;
-  });
+  // Caps Lock detection is only meaningful with a physical keyboard. On touch devices
+  // the soft keyboard's shift / auto-capitalize state is reported as CapsLock, which
+  // would give a false "Caps Lock is on" on the first letter, so skip it there.
+  if (capsHint && !isTouchDevice) {
+    passwordInput.addEventListener("keydown", updateCaps);
+    passwordInput.addEventListener("keyup", updateCaps);
+    passwordInput.addEventListener("blur", () => {
+      capsHint.hidden = true;
+    });
+  }
 
   function setStatus(text) {
     statusText.textContent = text;
@@ -388,7 +396,7 @@
       setTabTitle("New Tab");
       address.value = "";
       setStatus("Start page");
-      document.title = "Perch — bytetech.cloud";
+      document.title = `Perch — ${HOST_LABEL}`;
       blurKbd();
     }
   }
@@ -603,7 +611,7 @@
       }
       if (document.activeElement !== address) address.value = meta.url;
       if (!viewport.classList.contains("is-waiting")) setStatus(meta.url);
-      document.title = `${meta.title || "Perch"} — bytetech.cloud`;
+      document.title = `${meta.title || "Perch"} — ${HOST_LABEL}`;
     }
     if (meta.title && !(viewport.classList.contains("is-waiting") && meta.title === meta.url)) {
       setTabTitle(meta.title);
@@ -1242,6 +1250,14 @@
   });
 
   if (!isTouchDevice) btnKbd.title = "Keyboard (for touch devices)";
+
+  (function brandHost() {
+    const foot = document.querySelector(".login-foot");
+    if (foot) foot.textContent = `Single session · password-protected · ${HOST_LABEL}`;
+    const kicker = document.querySelector(".start-kicker");
+    if (kicker) kicker.textContent = `Perch · ${HOST_LABEL}`;
+    document.title = `Perch — ${HOST_LABEL}`;
+  })();
 
   checkSession();
 })();
