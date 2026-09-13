@@ -620,6 +620,10 @@ body.is-focus .statusbar {
   color: var(--text);
 }
 
+.icon-btn svg[hidden] {
+  display: none;
+}
+
 .icon-btn.is-on {
   color: var(--accent);
   background: rgba(110, 168, 255, 0.12);

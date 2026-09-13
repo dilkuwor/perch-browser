@@ -20,6 +20,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 
 - **Real Chromium, streamed.** Pages render on the home server and stream as binary JPEG frames over WebSocket; input is forwarded with the Chrome DevTools Protocol.
 - **Egress from home.** Every site sees your home network's public IP, not the device in your hand.
+- **Sound.** What Chromium plays at home — video, music, calls — streams to the device as Opus (or raw PCM on browsers without WebCodecs), with a mute button in the title bar.
 - **Tabs.** A real tab strip to open, switch, and close tabs. Popups and SSO windows take over the view and hand it back when closed.
 - **Non-blocking navigation.** Keep full mouse and keyboard control while a page loads, with no stale frames after a URL change.
 - **Sign-in friendly.** Real key events, hover-before-click, and no automation banner, so Google's "are you human?" checks and corporate SSO behave like a local browser.
@@ -116,7 +117,20 @@ sudo apt-get install -y nodejs
 # Chromium (Debian package name is chromium; Ubuntu may use chromium-browser)
 sudo apt-get update
 sudo apt-get install -y chromium || sudo apt-get install -y chromium-browser
+
+# Sound (optional): PulseAudio and ffmpeg. Skip these and set AUDIO=0 to run silent.
+sudo apt-get install -y pulseaudio ffmpeg
 ```
+
+For sound, Chromium needs a PulseAudio (or PipeWire-Pulse) server to play into and ffmpeg captures it. On a headless server with no sound card, start one with a null sink for the user that runs Perch:
+
+```bash
+pulseaudio --start --exit-idle-time=-1
+pactl load-module module-null-sink sink_name=perch
+pactl set-default-sink perch
+```
+
+On a desktop that already runs PulseAudio or PipeWire, the same `pactl` commands add the sink; or set `AUDIO_SOURCE=@DEFAULT_MONITOR@` to stream whatever the machine's speakers play.
 
 Confirm the binaries:
 
@@ -155,6 +169,10 @@ All settings are read from environment variables (via `.env` when running native
 | `CHROME_HEADLESS`   | `1`                        | `0` runs a real (headed) Chromium under Xvfb — the Docker default, and the mode you want for Google, CAPTCHAs, and corporate sign-in, since headless Chromium is easier to detect and gets challenged more often. |
 | `CHROME_USER_DATA`  | _(temporary)_              | Directory for the Chrome profile. Set it to keep cookies and site trust between restarts; otherwise every site treats each restart as a brand-new visitor. |
 | `JPEG_QUALITY`      | `60`                       | Frame quality, 20–95. Lower trades sharpness for bandwidth; try `45` on a slow mobile link.                  |
+| `AUDIO`             | `1`                        | `0` disables sound capture entirely (no PulseAudio or ffmpeg needed).                                        |
+| `AUDIO_SOURCE`      | `perch.monitor`            | PulseAudio source ffmpeg records. The Docker image creates the `perch` null sink; natively, create it with `pactl` (see above) or use `@DEFAULT_MONITOR@`. |
+| `AUDIO_BITRATE`     | `96`                       | Opus bitrate in kbit/s (24–256). Raw PCM, used by browsers without WebCodecs Opus, is a fixed 24 kHz stereo. |
+| `FFMPEG_PATH`       | _(auto-detect)_            | Path to the ffmpeg binary, if it is not on `PATH`.                                                           |
 
 ## Verify it works
 
@@ -188,6 +206,10 @@ The title bar is a real tab strip. **+** opens a new tab (showing the start page
 - **Ctrl/Cmd + L** — focus the address bar.
 - **F11** — toggle fullscreen.
 
+### Sound
+
+Whatever the remote Chromium plays streams to your device. Browsers only allow sound after you interact with the page, so the first click or tap in the viewport switches it on; the speaker button in the title bar mutes and unmutes, and the choice is remembered on that device. The **Latency** panel shows which encoding is in use: **Opus** (about 100 kbit/s, on Chrome, Edge, Firefox, and recent Safari) or **PCM** (about 770 kbit/s) as a fallback. When nothing is playing, the stream costs almost nothing.
+
 ### Latency
 
 The chart icon next to **Focus** opens a panel with live connection stats: round-trip time to the home server, frames per second, bandwidth, and the remote viewport size. The dot on the icon is green under ~80 ms, amber under ~200 ms, and red above — handy for telling an unresponsive site apart from a slow link.
@@ -209,6 +231,8 @@ Node.js launches system Chromium with `puppeteer-core` and talks to it over the 
 Frames come from Chromium's own `Page.startScreencast`: Chromium pushes a JPEG only when pixels change, so an idle page costs nothing and a scrolling page streams at the compositor rate. Frames travel as **binary** WebSocket messages (a 9-byte header plus the JPEG — no base64, no JSON), and the client decodes them off the main thread with `createImageBitmap`, always painting only the newest one.
 
 Navigation is non-blocking. Changing the URL sends `Page.navigate` and returns; you keep full mouse and keyboard control while the site loads, and the viewport is cleared the moment you press **Go**. Every navigation bumps an _epoch_, and frames from the old document are dropped, so you never see stale content after a URL change. JavaScript dialogs (`alert`, `confirm`, `beforeunload`) are auto-answered so they can never wedge the stream, and downloads are refused.
+
+Sound follows the same path. Chromium plays into a PulseAudio null sink on the server; ffmpeg records that sink's monitor, encodes it as Opus in 20 ms packets, and the server forwards each packet as a binary WebSocket message (a 6-byte header plus the packet) to every client that asked for sound. The client decodes with WebCodecs `AudioDecoder` and schedules the samples with the Web Audio API a few tens of milliseconds ahead of the clock, dropping the queue and resyncing if a stall leaves it behind live. Browsers without an Opus decoder ask for raw PCM instead. ffmpeg only runs while someone is listening.
 
 Popups and new tabs (SSO sign-in windows, `target=_blank` links) take over the view automatically. When such a window closes, the view returns to the page that opened it — what an OAuth / SSO round-trip expects.
 

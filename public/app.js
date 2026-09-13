@@ -28,6 +28,10 @@
   const wsDot = document.getElementById("ws-dot");
   const ipChip = document.getElementById("ip-chip");
   const btnFocus = document.getElementById("btn-focus");
+  const btnAudio = document.getElementById("btn-audio");
+  const audioOnIcon = document.getElementById("audio-on-icon");
+  const audioOffIcon = document.getElementById("audio-off-icon");
+  const latAudio = document.getElementById("lat-audio");
   const btnMaximize = document.getElementById("btn-maximize");
   const btnFullscreen = document.getElementById("btn-fullscreen");
   const btnLogout = document.getElementById("btn-logout");
@@ -222,6 +226,13 @@
     latFps.textContent = `${fps < 10 ? fps.toFixed(1) : Math.round(fps)} fps`;
     latBw.textContent = fmtBytes(bw);
     latSize.textContent = `${state.frameW} × ${state.frameH}`;
+    const pkts = Math.round(audio.packets / secs);
+    audio.packets = 0;
+    latAudio.textContent = !audio.format
+      ? "unsupported"
+      : !audio.enabled
+        ? "off"
+        : `${audio.format === "opus" ? "Opus" : "PCM"}${pkts ? ` · ${pkts} pkt/s` : ""}`;
     latencyDot.className = "latency-dot";
     if (state.rtt != null) {
       latencyDot.classList.add(state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor");
@@ -464,7 +475,298 @@
     }
   }
 
+  // ——— audio ———
+  //
+  // Sound arrives as binary messages next to the frames: a 6-byte header (type 2, format,
+  // sequence) and either an Opus packet (decoded with WebCodecs) or 20 ms of raw PCM
+  // (for browsers without an Opus AudioDecoder). Either way playback is a chain of
+  // AudioBufferSourceNodes scheduled a few tens of milliseconds ahead of the clock.
+
+  const AUDIO_FRAME_TYPE = 2;
+  const AUDIO_HEADER_BYTES = 6;
+  const AUDIO_LEAD = 0.08; // jitter buffer, seconds
+  const AUDIO_MAX_LAG = 0.4; // resync when queued audio runs this far ahead of the clock
+  const OPUS_RATE = 48000;
+  const PCM_RATE = 24000;
+  const audio = {
+    enabled: readAudioPref(),
+    format: null, // "opus" | "pcm" | null when this browser cannot play remote sound
+    ctx: null,
+    gain: null,
+    decoder: null,
+    nextTime: 0,
+    seq: -1,
+    pending: new Set(),
+    hinted: false,
+    packets: 0,
+  };
+
+  function readAudioPref() {
+    try {
+      return localStorage.getItem("perch-audio") !== "0";
+    } catch {
+      return true;
+    }
+  }
+
+  function writeAudioPref(on) {
+    try {
+      localStorage.setItem("perch-audio", on ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }
+
+  async function detectAudioFormat() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (typeof AudioDecoder === "function" && typeof EncodedAudioChunk === "function") {
+      try {
+        const r = await AudioDecoder.isConfigSupported({ codec: "opus", sampleRate: OPUS_RATE, numberOfChannels: 2 });
+        if (r && r.supported) return "opus";
+      } catch {
+        // fall through to PCM
+      }
+    }
+    return "pcm";
+  }
+
+  function sendAudioPref() {
+    sendWs({ type: "audio", format: audio.enabled && audio.format ? audio.format : null });
+  }
+
+  function renderAudioButton() {
+    const on = audio.enabled && Boolean(audio.format);
+    btnAudio.classList.toggle("is-on", on);
+    btnAudio.setAttribute("aria-pressed", on ? "true" : "false");
+    btnAudio.title = !audio.format
+      ? "Sound is not supported in this browser"
+      : on
+        ? "Sound on (click to mute)"
+        : "Sound off (click to unmute)";
+    audioOnIcon.hidden = !on;
+    audioOffIcon.hidden = on;
+  }
+
+  function audioRunning() {
+    return Boolean(audio.ctx && audio.ctx.state === "running");
+  }
+
+  // Browsers only let a page make noise after a user gesture; call this from one.
+  function unlockAudio() {
+    if (!audio.format || !audio.enabled) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!audio.ctx) {
+      try {
+        audio.ctx = new AC({ latencyHint: "interactive" });
+      } catch {
+        return;
+      }
+      audio.gain = audio.ctx.createGain();
+      audio.gain.connect(audio.ctx.destination);
+    }
+    if (audio.ctx.state !== "running") audio.ctx.resume().catch(() => {});
+  }
+
+  function resetAudioClock() {
+    audio.seq = -1;
+    audio.nextTime = 0;
+    for (const src of audio.pending) {
+      try {
+        src.stop();
+      } catch {
+        // ignore
+      }
+    }
+    audio.pending.clear();
+  }
+
+  function ensureDecoder() {
+    if (audio.decoder && audio.decoder.state === "configured") return audio.decoder;
+    if (audio.decoder) {
+      try {
+        audio.decoder.close();
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      const dec = new AudioDecoder({
+        output: (data) => {
+          try {
+            playAudioData(data);
+          } finally {
+            data.close();
+          }
+        },
+        error: (err) => {
+          console.warn(`[perch] audio decoder: ${err && err.message}`);
+          audio.decoder = null;
+        },
+      });
+      dec.configure({ codec: "opus", sampleRate: OPUS_RATE, numberOfChannels: 2 });
+      audio.decoder = dec;
+      return dec;
+    } catch {
+      audio.decoder = null;
+      return null;
+    }
+  }
+
+  function deinterleave(all, ch, frames, scale) {
+    const planes = [];
+    for (let c = 0; c < ch; c += 1) {
+      const p = new Float32Array(frames);
+      for (let i = 0; i < frames; i += 1) p[i] = all[i * ch + c] * scale;
+      planes.push(p);
+    }
+    return planes;
+  }
+
+  function playAudioData(data) {
+    const ch = data.numberOfChannels;
+    const frames = data.numberOfFrames;
+    const fmt = data.format || "";
+    let planes = [];
+    if (fmt === "f32-planar") {
+      for (let c = 0; c < ch; c += 1) {
+        const p = new Float32Array(frames);
+        data.copyTo(p, { planeIndex: c });
+        planes.push(p);
+      }
+    } else if (fmt === "f32") {
+      const all = new Float32Array(frames * ch);
+      data.copyTo(all, { planeIndex: 0 });
+      planes = deinterleave(all, ch, frames, 1);
+    } else if (fmt === "s16") {
+      const all = new Int16Array(frames * ch);
+      data.copyTo(all, { planeIndex: 0 });
+      planes = deinterleave(all, ch, frames, 1 / 32768);
+    } else if (fmt === "s16-planar") {
+      for (let c = 0; c < ch; c += 1) {
+        const raw = new Int16Array(frames);
+        data.copyTo(raw, { planeIndex: c });
+        planes.push(Float32Array.from(raw, (v) => v / 32768));
+      }
+    } else {
+      try {
+        for (let c = 0; c < ch; c += 1) {
+          const p = new Float32Array(frames);
+          data.copyTo(p, { planeIndex: c, format: "f32-planar" });
+          planes.push(p);
+        }
+      } catch {
+        return;
+      }
+    }
+    scheduleAudio(planes, data.sampleRate);
+  }
+
+  function scheduleAudio(planes, rate) {
+    if (!audioRunning() || !planes.length || !planes[0].length) return;
+    const ctx = audio.ctx;
+    const buf = ctx.createBuffer(planes.length, planes[0].length, rate);
+    for (let c = 0; c < planes.length; c += 1) buf.getChannelData(c).set(planes[c]);
+    const now = ctx.currentTime;
+    if (audio.nextTime < now + 0.005) {
+      // First packet, or we ran dry: start again a little ahead of the clock.
+      audio.nextTime = now + AUDIO_LEAD;
+    } else if (audio.nextTime > now + AUDIO_MAX_LAG) {
+      // A burst after a stall left us far behind live: drop the queue and catch up.
+      for (const src of audio.pending) {
+        try {
+          src.stop();
+        } catch {
+          // ignore
+        }
+      }
+      audio.pending.clear();
+      audio.nextTime = now + AUDIO_LEAD;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audio.gain);
+    src.onended = () => audio.pending.delete(src);
+    audio.pending.add(src);
+    src.start(audio.nextTime);
+    audio.nextTime += buf.duration;
+  }
+
+  function onAudioMessage(buf) {
+    if (buf.byteLength <= AUDIO_HEADER_BYTES) return;
+    const dv = new DataView(buf);
+    const code = dv.getUint8(1);
+    const format = code === 1 ? "opus" : code === 2 ? "pcm" : null;
+    const seq = dv.getUint32(2);
+    state.statBytes += buf.byteLength;
+    audio.packets += 1;
+    if (!audio.enabled || !format) return;
+    if (!audioRunning()) {
+      if (!audio.hinted) {
+        audio.hinted = true;
+        flashStatus("Tap or click the page to enable sound", 6000);
+      }
+      return;
+    }
+    audio.seq = seq;
+    if (format === "opus") {
+      const dec = ensureDecoder();
+      if (!dec) return;
+      if (dec.decodeQueueSize > 25) return; // hopelessly behind; skip this packet
+      try {
+        dec.decode(
+          new EncodedAudioChunk({
+            type: "key",
+            timestamp: seq * 20000,
+            data: new Uint8Array(buf, AUDIO_HEADER_BYTES),
+          })
+        );
+      } catch {
+        audio.decoder = null;
+      }
+      return;
+    }
+    const frames = (buf.byteLength - AUDIO_HEADER_BYTES) >> 2;
+    if (!frames) return;
+    const all = new Int16Array(buf, AUDIO_HEADER_BYTES, frames * 2);
+    scheduleAudio(deinterleave(all, 2, frames, 1 / 32768), PCM_RATE);
+  }
+
+  btnAudio.addEventListener("click", () => {
+    if (!audio.format) {
+      flashStatus("Sound is not supported in this browser", 4000);
+      return;
+    }
+    audio.enabled = !audio.enabled;
+    writeAudioPref(audio.enabled);
+    renderAudioButton();
+    if (audio.enabled) unlockAudio();
+    else resetAudioClock();
+    sendAudioPref();
+    flashStatus(audio.enabled ? "Sound on" : "Sound off", 1500);
+  });
+
+  for (const type of ["pointerdown", "keydown", "touchend", "click"]) {
+    document.addEventListener(
+      type,
+      () => {
+        if (audio.enabled && audio.format && !audioRunning()) unlockAudio();
+      },
+      { capture: true, passive: true }
+    );
+  }
+
+  detectAudioFormat().then((format) => {
+    audio.format = format;
+    renderAudioButton();
+    sendAudioPref();
+  });
+
   function onBinaryFrame(buf) {
+    if (buf.byteLength > 0 && new DataView(buf).getUint8(0) === AUDIO_FRAME_TYPE) {
+      onAudioMessage(buf);
+      return;
+    }
     const header = decodeHeader(buf);
     if (!header) return;
     state.statFrames += 1;
@@ -752,10 +1054,12 @@
       wsDot.classList.add("on");
       state.reconnectDelay = 500;
       sendResize(true);
+      sendAudioPref();
     });
     ws.addEventListener("close", () => {
       if (gen !== state.wsGen) return;
       wsDot.classList.remove("on");
+      resetAudioClock();
       if (appScreen.hidden) return;
       const wait = state.reconnectDelay;
       state.reconnectDelay = Math.min(state.reconnectDelay * 2, 8000);

@@ -4,6 +4,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     chromium \
     xvfb \
+    pulseaudio \
+    ffmpeg \
     fonts-liberation \
     fonts-noto-core \
     fonts-noto-color-emoji \
@@ -29,7 +31,10 @@ ENV NODE_ENV=production \
     CHROME_NO_SANDBOX=1 \
     CHROME_HEADLESS=0 \
     CHROME_USER_DATA=/data/chrome \
-    DISPLAY=:99
+    DISPLAY=:99 \
+    AUDIO=1 \
+    XDG_RUNTIME_DIR=/tmp/perch-runtime \
+    PULSE_SERVER=unix:/tmp/perch-runtime/pulse.sock
 
 EXPOSE 8080
 

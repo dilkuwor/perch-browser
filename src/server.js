@@ -16,8 +16,8 @@ const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT) || 8080;
 const HOME_URL = process.env.HOME_URL || "https://www.google.com/";
 // Bumped whenever the server protocol changes; lets a client confirm it is not talking
-// to an older process. Tabs + binary screencast landed in build 2.
-const BUILD = 2;
+// to an older process. Audio landed in build 3. Tabs + binary screencast landed in build 2.
+const BUILD = 3;
 
 if (!APP_PASSWORD) {
   console.error("Refusing to start: APP_PASSWORD is missing.");
@@ -45,8 +45,9 @@ app.get("/health", (_req, res) => {
     ok: true,
     status: "ok",
     build: BUILD,
-    features: ["tabs", "binary-frames", "latency"],
+    features: ["tabs", "binary-frames", "latency", ...(browser.audioEnabled ? ["audio"] : [])],
     chromium: browser.ready,
+    audio: browser.audioEnabled ? (browser.audioActive ? "streaming" : "idle") : "disabled",
     user: APP_USER,
   });
 });

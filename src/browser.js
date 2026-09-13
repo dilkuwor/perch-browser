@@ -18,6 +18,8 @@ const NAVIGATE_REPLY_MS = 3_000;
 const META_POLL_MS = 1_000;
 const INPUT_QUEUE_MAX = 128;
 
+const { AudioStreamer, AUDIO_FORMATS } = require("./audio");
+
 const FRAME_TYPE = 1;
 const FRAME_HEADER_BYTES = 9;
 
@@ -359,6 +361,8 @@ class HomeBrowser {
     this._tabsTimer = null;
     this._adoptChain = Promise.resolve();
     this._lastActive = null;
+    this.audioEnabled = String(process.env.AUDIO || "1") !== "0";
+    this._audio = {};
   }
 
   get ready() {
@@ -986,6 +990,56 @@ class HomeBrowser {
   removeClient(ws) {
     this.clients.delete(ws);
     if (this.clients.size === 0) this._stopScreencast().catch(() => {});
+    this._syncAudio();
+  }
+
+  // ——— audio ———
+
+  // A client opts in with { type: "audio", format: "opus" | "pcm" } and out with
+  // format null. ffmpeg runs only while somebody is listening.
+  _setClientAudio(ws, format) {
+    const want = this.audioEnabled && AUDIO_FORMATS.includes(format) ? format : null;
+    if (ws.audioFormat === want) return;
+    ws.audioFormat = want;
+    this._syncAudio();
+  }
+
+  _syncAudio() {
+    for (const format of AUDIO_FORMATS) {
+      let wanted = false;
+      for (const ws of this.clients) {
+        if (ws.audioFormat === format && ws.readyState === 1) {
+          wanted = true;
+          break;
+        }
+      }
+      let streamer = this._audio[format];
+      if (wanted && !streamer) {
+        streamer = new AudioStreamer({ format });
+        streamer.on("packet", (payload) => this._sendAudio(format, payload));
+        this._audio[format] = streamer;
+      }
+      if (!streamer) continue;
+      if (wanted) streamer.start();
+      else streamer.stop();
+    }
+  }
+
+  _sendAudio(format, payload) {
+    for (const ws of this.clients) {
+      if (ws.audioFormat !== format || ws.readyState !== 1) continue;
+      // Under backpressure drop audio rather than queue it: stale sound is worse than a gap.
+      if (ws.bufferedAmount >= WS_BACKPRESSURE) continue;
+      try {
+        ws.send(payload, { binary: true });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  get audioActive() {
+    return Object.values(this._audio).some((a) => a.running);
   }
 
   // ——— navigation ———
@@ -1106,6 +1160,10 @@ class HomeBrowser {
 
   handleInput(msg, ws) {
     if (!msg || !msg.type) return Promise.resolve();
+    if (msg.type === "audio") {
+      this._setClientAudio(ws, msg.format);
+      return Promise.resolve();
+    }
     if (msg.type === "resize") {
       if (!this.ready) return Promise.resolve();
       return this.resize(msg.width, msg.height);
@@ -1337,6 +1395,7 @@ class HomeBrowser {
       }
     }
     this.clients.clear();
+    for (const streamer of Object.values(this._audio)) streamer.stop();
     await this._stopScreencast();
     await this._killBrowser();
   }

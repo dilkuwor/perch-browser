@@ -16,6 +16,8 @@ services:
       CHROME_HEADLESS: "0"
       CHROME_USER_DATA: /data/chrome
       JPEG_QUALITY: ${JPEG_QUALITY:-60}
+      AUDIO: ${AUDIO:-1}
+      AUDIO_BITRATE: ${AUDIO_BITRATE:-96}
     volumes:
       - chrome-profile:/data/chrome
     shm_size: "1gb"
