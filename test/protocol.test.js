@@ -143,3 +143,59 @@ describe("frame backpressure", () => {
     browser.adblock.stop();
   });
 });
+
+describe("viewers", () => {
+  const { HomeBrowser } = require("../src/browser");
+
+  function socket() {
+    return { readyState: 1, bufferedAmount: 0, sent: [], send(p) { this.sent.push(p); } };
+  }
+
+  it("sends no frames to a client that is not on screen, and resumes when it returns", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const phone = socket();
+    const laptop = socket();
+    browser.clients.add(phone);
+    browser.clients.add(laptop);
+    await browser.setClientHidden(phone, true);
+    assert.equal(browser._viewers(), 1);
+    browser._sendFrame(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 1, 100, 100);
+    assert.equal(phone.sent.length, 0);
+    assert.equal(laptop.sent.length, 1);
+    await browser.setClientHidden(phone, false);
+    browser._sendFrame(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 1, 100, 100);
+    assert.equal(phone.sent.length, 1);
+    browser.adblock.stop();
+  });
+
+  it("stops encoding altogether when nobody is watching", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    let stopped = 0;
+    browser._stopScreencast = async () => { stopped += 1; };
+    const only = socket();
+    browser.clients.add(only);
+    await browser.setClientHidden(only, true);
+    assert.equal(stopped, 1);
+    assert.equal(browser._viewers(), 0);
+    browser._sendFrame(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 1, 100, 100);
+    assert.equal(only.sent.length, 0);
+    browser.adblock.stop();
+  });
+});
+
+describe("shared memory flag", () => {
+  const { useDevShm } = require("../src/browser");
+  const GB = 1024 * 1024 * 1024;
+  const fsOf = (bytes) => () => ({ bsize: 4096, blocks: bytes / 4096 });
+
+  it("honours an explicit override", () => {
+    assert.equal(useDevShm({ CHROME_DEV_SHM: "1" }, fsOf(0)), true);
+    assert.equal(useDevShm({ CHROME_DEV_SHM: "0" }, fsOf(8 * GB)), false);
+  });
+
+  it("uses /dev/shm only when the container was given room (Linux)", { skip: process.platform !== "linux" }, () => {
+    assert.equal(useDevShm({}, fsOf(GB)), true);
+    assert.equal(useDevShm({}, fsOf(64 * 1024 * 1024)), false, "Docker's 64 MB default keeps the safe flag");
+    assert.equal(useDevShm({}, () => { throw new Error("no /dev/shm"); }), false);
+  });
+});

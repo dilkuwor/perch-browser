@@ -185,6 +185,7 @@ All settings are read from environment variables (via `.env` when running native
 | `HOME_URL`          | `https://www.google.com/`  | Page the **Home** button loads.                                                                             |
 | `CHROME_PATH`       | _(auto-detect)_            | Path to the Chrome / Chromium binary. Leave empty to auto-detect; set it if the binary lives somewhere unusual. |
 | `CHROME_NO_SANDBOX` | `0`                        | Set to `1` if Chromium fails with a sandbox error (common on some VPS / LXC hosts). Prefer a real user-namespace sandbox where possible. |
+| `CHROME_DEV_SHM`    | _(auto)_                   | Whether Chromium may use `/dev/shm` for its shared memory. Auto: yes when `/dev/shm` is at least 512 MB (Compose and the `docker run` above give it 1 GB), otherwise no — Docker's 64 MB default would crash Chromium. `1` / `0` forces it. |
 | `CHROME_HEADLESS`   | `1`                        | `0` runs a real (headed) Chromium under Xvfb — the Docker default, and the mode you want for Google, CAPTCHAs, and corporate sign-in, since headless Chromium is easier to detect and gets challenged more often. |
 | `CHROME_USER_DATA`  | _(temporary)_              | Directory for the Chrome profile. Set it to keep cookies and site trust between restarts; otherwise every site treats each restart as a brand-new visitor. |
 | `JPEG_QUALITY`      | `60`                       | Frame quality, 20–100. Lower trades sharpness for bandwidth; try `45` on a slow mobile link.                  |
@@ -280,6 +281,7 @@ Browsers only allow installation — and the service worker behind it — on **H
 - **Nothing is downloaded twice, nothing is ever stale.** Scripts, styles, icons and wallpapers are served under a hash of their content (`/app.js?v=3f9c…`) and cached permanently; the small page that names them is never cached. An update therefore appears on the very next load — no hard refresh, no clearing caches — while a repeat visit transfers a few kilobytes. Text is pre-compressed with Brotli (gzip as fallback).
 - **The service worker cannot pin you to an old version.** It stores only those hashed files, always fetches pages from the server, and never touches the API or the live stream. If the home server is unreachable it shows a plain "can't reach your Perch" page with a retry button.
 - **Slow links stay current instead of falling behind.** While a connection is still busy delivering a frame, the server holds only the newest one and drops the rest, so a phone on mobile data sees fewer frames rather than an ever-growing delay. On a fast link nothing is dropped.
+- **Nothing is streamed to a screen nobody is looking at.** When Perch is in a background tab, or the phone app is in the background, that device stops receiving pictures; when no device is watching at all, the home server stops capturing and encoding. Sound keeps playing, and the picture is current again the moment you return.
 - The app opens as soon as your session is confirmed; the home IP (an outside lookup) fills in afterwards.
 
 ### Google "are you a human?" and corporate sign-in

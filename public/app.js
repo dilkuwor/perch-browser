@@ -95,6 +95,8 @@
     tabsUnsupported: false,
     latencyTimer: null,
     adblock: false,
+    wheel: null,
+    wheelFrame: 0,
     remoteFs: false,
     fsByRemote: false,
     settings: null,
@@ -1591,6 +1593,17 @@
     // transition makes Chromium drop back out of fullscreen.
   }
 
+  // ——— visibility ———
+
+  // When Perch is not on screen (another browser tab, phone app in the background) the
+  // server is told to stop sending pictures to this device; sound carries on. Coming
+  // back asks for a fresh frame, so the view is current the moment it is visible again.
+  function sendVisibility() {
+    sendWs({ type: "visibility", hidden: document.visibilityState === "hidden" });
+  }
+
+  document.addEventListener("visibilitychange", sendVisibility);
+
   // ——— socket ———
 
   function closeSocket() {
@@ -1624,6 +1637,7 @@
       state.reconnectDelay = 500;
       sendResize(true);
       sendAudioPref();
+      sendVisibility();
       // Measure at once so the gauge needle settles without waiting for the 5 s tick.
       sendPing();
     });
@@ -1723,6 +1737,10 @@
   }
 
   function sendWs(obj) {
+    // A click or key press must not overtake scrolling that happened just before it.
+    if (state.wheel && obj && (obj.type === "key" || obj.type === "paste" || (obj.type === "mouse" && obj.action !== "move"))) {
+      flushWheel();
+    }
     const ws = state.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (obj && obj.type === "mouse" && obj.action === "move" && ws.bufferedAmount > 256000) return;
@@ -1839,6 +1857,18 @@
     e.preventDefault();
   });
 
+  // Trackpads fire 60–120 wheel events a second. They are summed and sent once per
+  // display frame: the same total scroll, a fraction of the messages, and nothing is
+  // ever sent faster than the screen could show the result. A change of modifier keys
+  // (Ctrl+wheel zoom vs. plain scroll) flushes first, so deltas never mix meanings.
+  function flushWheel() {
+    cancelAnimationFrame(state.wheelFrame);
+    state.wheelFrame = 0;
+    const w = state.wheel;
+    state.wheel = null;
+    if (w && (w.deltaX || w.deltaY)) sendWs(w);
+  }
+
   viewport.addEventListener("wheel", (e) => {
     if (!state.live) return;
     e.preventDefault();
@@ -1846,16 +1876,17 @@
     let scale = 1;
     if (e.deltaMode === 1) scale = 32;
     else if (e.deltaMode === 2) scale = p.vh;
-    sendWs({
-      type: "wheel",
-      x: p.x,
-      y: p.y,
-      vw: p.vw,
-      vh: p.vh,
-      deltaX: e.deltaX * scale,
-      deltaY: e.deltaY * scale,
-      ...mods(e),
-    });
+    const m = mods(e);
+    const w = state.wheel;
+    if (w && (w.alt !== m.alt || w.ctrl !== m.ctrl || w.meta !== m.meta || w.shift !== m.shift)) flushWheel();
+    if (state.wheel) {
+      state.wheel.deltaX += e.deltaX * scale;
+      state.wheel.deltaY += e.deltaY * scale;
+      Object.assign(state.wheel, { x: p.x, y: p.y, vw: p.vw, vh: p.vh });
+    } else {
+      state.wheel = { type: "wheel", x: p.x, y: p.y, vw: p.vw, vh: p.vh, deltaX: e.deltaX * scale, deltaY: e.deltaY * scale, ...m };
+    }
+    if (!state.wheelFrame) state.wheelFrame = requestAnimationFrame(flushWheel);
   }, { passive: false });
 
   // ——— touch: one finger drags scroll, a still finger taps, a long press right-clicks ———
