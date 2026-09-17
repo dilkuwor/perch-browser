@@ -66,6 +66,12 @@ describe("update", () => {
     assert.equal(reloaded.searchUrl(), "https://duckduckgo.com/?q=%s");
   });
 
+  it("accepts the dark and light bundled wallpapers", () => {
+    const settings = new Settings({ dataDir: dir, env: {} });
+    assert.equal(settings.update({ newTab: { background: "dark" } }).newTab.background, "dark");
+    assert.equal(settings.update({ newTab: { background: "light" } }).newTab.background, "light");
+  });
+
   it("rejects bad values and unknown keys", () => {
     const settings = new Settings({ dataDir: dir, env: {} });
     const s = settings.update({

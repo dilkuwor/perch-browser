@@ -1663,6 +1663,100 @@ label.set-row {
   display: none;
 }
 
+/* The feature list outgrew a bold one-liner. */
+#about-server {
+  max-width: 58%;
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.set-btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.set-btn-primary:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.pw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  max-width: 380px;
+}
+
+.pw-input {
+  position: relative;
+  display: flex;
+}
+
+.pw-input input {
+  width: 100%;
+  height: 38px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+  color: var(--text);
+  padding: 0 40px 0 12px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.pw-input input:focus {
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+}
+
+.pw-input input.is-invalid {
+  border-color: var(--danger);
+}
+
+.pw-reveal {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.pw-reveal:hover,
+.pw-reveal[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.pw-status {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ok);
+  max-width: 380px;
+}
+
+.pw-status.is-error {
+  color: var(--danger);
+}
+
+.pw-status[hidden] {
+  display: none;
+}
+
 .set-btn-quiet {
   border-color: transparent;
   color: var(--muted);
@@ -1691,7 +1785,7 @@ label.set-row {
 
 .bg-choices {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
   gap: 10px;
 }
 
@@ -1727,8 +1821,12 @@ label.set-row {
   background: #090b10 center / cover no-repeat;
 }
 
-.bg-thumb-default {
-  background-image: url("img/newtab-default.webp");
+.bg-thumb-dark {
+  background-image: url("img/newtab-dark.webp");
+}
+
+.bg-thumb-light {
+  background-image: url("img/newtab-light.webp");
 }
 
 .bg-thumb-custom {

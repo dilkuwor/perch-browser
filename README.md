@@ -46,7 +46,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 ## Requirements
 
 - Docker and Docker Compose (recommended), **or** Node.js 20+ with Google Chrome / Chromium installed
-- A long password (12+ characters) for `APP_PASSWORD`
+- A password for `APP_PASSWORD`
 
 Single Chromium session: there is one browser process. A second login uses — and can take over — that same session, sharing its cookies, tabs, and page.
 
@@ -66,7 +66,7 @@ Both methods below use that image. It bundles Chromium, Xvfb, PulseAudio, and ff
 
    ```bash
    cp .env.example .env
-   nano .env                     # set APP_PASSWORD to 12+ characters
+   nano .env                     # set APP_PASSWORD
    ```
 
 2. Start the container:
@@ -165,7 +165,7 @@ From this repo on the **home server**:
 ```bash
 cd /opt/perch                 # or wherever you cloned this repo
 cp .env.example .env
-nano .env                     # set APP_PASSWORD to 12+ characters
+nano .env                     # set APP_PASSWORD
 npm install
 npm start
 ```
@@ -178,7 +178,7 @@ All settings are read from environment variables (via `.env` when running native
 
 | Variable            | Default                    | Description                                                                                                 |
 | ------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `APP_PASSWORD`      | _(required)_               | Login password. The process **refuses to start** if it is missing or shorter than 12 characters.            |
+| `APP_PASSWORD`      | _(required)_               | Initial login password (it can later be changed in Settings, which then takes precedence). The process **refuses to start** if it is missing.            |
 | `APP_USER`          | `admin`                    | Display name for the signed-in user.                                                                        |
 | `HOST`              | `0.0.0.0`                  | Address the server binds to.                                                                                 |
 | `PORT`              | `8080`                     | Port the server listens on.                                                                                  |
@@ -252,7 +252,8 @@ The gear icon in the title bar opens the settings page (**Esc** or **Done** clos
 
 - **Appearance.** Dark, Light, or Auto (follows each device's own light/dark preference). This themes Perch's own interface; websites and your wallpaper are untouched.
 - **Top bar.** Show or hide Latency, Ad blocker, Sound, Focus mode, Maximize, the Home and Keyboard buttons, and the status bar. Hidden tools keep working — a hidden ad blocker still blocks. Settings, Fullscreen, and Sign out are always shown so you cannot lock yourself out.
-- **New tab page.** Pick the bundled wallpaper, your own image, or none; set how much the image is dimmed; show or hide the search box and shortcuts. Uploads are resized (to at most 2560 × 1600) and converted to WebP in your browser first, so a 12-megapixel phone photo becomes a few hundred kilobytes. Any aspect ratio works: the image is cropped to fill the page on each screen.
+- **New tab page.** Pick the bundled wallpaper (one view in two versions — starry night in the dark theme, sunrise in the light theme), your own image, or none; set how much the image is dimmed; show or hide the search box and shortcuts. Uploads are resized (to at most 2560 × 1600) and converted to WebP in your browser first, so a 12-megapixel phone photo becomes a few hundred kilobytes. Any aspect ratio works: the image is cropped to fill the page on each screen.
+- **Security.** Change the sign-in password. You must enter the current one, and every other device is signed out at once. The new password is stored as a salted scrypt hash in `perch-auth/password.json` inside `CHROME_USER_DATA` and from then on **replaces `APP_PASSWORD`**, which is only the initial password. Forgot it? Delete that file and restart: `APP_PASSWORD` works again.
 - **Browsing.** Search engine (Google, DuckDuckGo, Bing, Brave, Startpage), the Home button's page (overrides `HOME_URL`), and the ad-blocker switch.
 - **Streaming.** Picture quality, applied live (overrides `JPEG_QUALITY`).
 - **About.** Home IP, server build, and a reset button.

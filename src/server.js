@@ -26,8 +26,15 @@ if (!APP_PASSWORD) {
   process.exit(1);
 }
 
-const auth = new Auth({ password: APP_PASSWORD, user: APP_USER });
 const browser = new HomeBrowser({ homeUrl: HOME_URL });
+const auth = new Auth({
+  password: APP_PASSWORD,
+  user: APP_USER,
+  dataDir: path.join(HomeBrowser.userDataDir(), "perch-auth"),
+});
+if (auth.passwordChanged) {
+  console.log("[home-browser] using the password set in Settings (APP_PASSWORD is ignored)");
+}
 // Next to the ad blocker's data, inside the Chrome profile, so one volume persists it all.
 const settings = new Settings({ dataDir: path.join(HomeBrowser.userDataDir(), "perch-settings") });
 
@@ -76,7 +83,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     status: "ok",
     build: BUILD,
-    features: ["tabs", "binary-frames", "latency", "adblock", "settings", ...(browser.audioEnabled ? ["audio"] : [])],
+    features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", ...(browser.audioEnabled ? ["audio"] : [])],
     chromium: browser.ready,
     audio: browser.audioEnabled ? (browser.audioActive ? "streaming" : "idle") : "disabled",
     user: APP_USER,
@@ -109,6 +116,32 @@ app.post("/api/login", (req, res) => {
   auth.setSessionCookie(req, res, token);
   console.log(`[home-browser] login ok for ${ip} (user=${APP_USER})`);
   res.json({ ok: true, user: APP_USER });
+});
+
+// Shares the login limiter: a stolen session must not become a way to guess the password.
+app.post("/api/password", auth.requireAuth.bind(auth), (req, res) => {
+  const ip = clientIp(req);
+  if (!auth.allowLoginAttempt(ip)) {
+    res.setHeader("Retry-After", String(auth.retryAfterSec(ip)));
+    res.status(429).json({ error: "Too many attempts. Try again later." });
+    return;
+  }
+  const body = req.body || {};
+  const keep = auth.tokenFromRequest(req);
+  let dropped;
+  try {
+    dropped = auth.changePassword(body.current, body.next, keep);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+    return;
+  }
+  // Devices signed in with the old password lose their live connection too, not just
+  // their cookie.
+  for (const ws of wss.clients) {
+    if (dropped.includes(ws.sessionToken)) ws.close(4001, "Password changed");
+  }
+  console.log(`[home-browser] password changed by ${ip}; ${dropped.length} other session(s) signed out`);
+  res.json({ ok: true, signedOut: dropped.length });
 });
 
 app.post("/api/logout", (req, res) => {
@@ -286,6 +319,7 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws, req, session) => {
   ws.isAlive = true;
   ws.sessionUser = session.user;
+  ws.sessionToken = auth.tokenFromRequest(req);
   console.log(`[home-browser] ws connected (${clientIp(req)}, user=${session.user})`);
   browser.addClient(ws);
 

@@ -119,3 +119,103 @@ describe("clientIp / isSecureRequest", () => {
     assert.equal(isSecureRequest(mockReq({ headers: { "x-forwarded-proto": "http" } })), false);
   });
 });
+
+describe("changing the password", () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const OLD = "initial-password-1";
+  const NEW = "correct horse battery";
+
+  function tempAuth() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-auth-test-"));
+    return { dataDir, auth: new Auth({ password: OLD, user: "admin", dataDir }) };
+  }
+
+  it("replaces the environment password and survives a restart", () => {
+    const { dataDir, auth } = tempAuth();
+    try {
+      auth.changePassword(OLD, NEW, null);
+      assert.equal(auth.verifyPassword(NEW), true);
+      assert.equal(auth.verifyPassword(OLD), false);
+      const restarted = new Auth({ password: OLD, user: "admin", dataDir });
+      assert.equal(restarted.passwordChanged, true);
+      assert.equal(restarted.verifyPassword(NEW), true);
+      assert.equal(restarted.verifyPassword(OLD), false);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores a salted hash, never the password, in an owner-only file", () => {
+    const { dataDir, auth } = tempAuth();
+    try {
+      auth.changePassword(OLD, NEW, null);
+      const file = path.join(dataDir, "password.json");
+      const raw = fs.readFileSync(file, "utf8");
+      assert.ok(!raw.includes(NEW));
+      assert.ok(JSON.parse(raw).salt.length >= 16);
+      if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires the current password and a non-blank, different new one", () => {
+    const { dataDir, auth } = tempAuth();
+    try {
+      assert.throws(() => auth.changePassword("wrong-password-xx", NEW, null), /Current password/);
+      assert.throws(() => auth.changePassword(OLD, "", null), /blank/);
+      assert.throws(() => auth.changePassword(OLD, "   ", null), /blank/);
+      assert.throws(() => auth.changePassword(OLD, OLD, null), /different/);
+      assert.throws(() => auth.changePassword(OLD, "x".repeat(300), null), /at most/);
+      assert.throws(() => auth.changePassword(OLD, { length: 99 }, null), /blank/);
+      assert.equal(auth.verifyPassword(OLD), true);
+      assert.equal(auth.passwordChanged, false);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a short password", () => {
+    const { dataDir, auth } = tempAuth();
+    try {
+      auth.changePassword(OLD, "abc", null);
+      assert.equal(auth.verifyPassword("abc"), true);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("signs out every other session but keeps the one that made the change", () => {
+    const { dataDir, auth } = tempAuth();
+    try {
+      const mine = auth.createSession("10.0.0.1");
+      const phone = auth.createSession("10.0.0.2");
+      const dropped = auth.changePassword(OLD, NEW, mine);
+      assert.deepEqual(dropped, [phone]);
+      assert.ok(auth.getSession(mine));
+      assert.equal(auth.getSession(phone), null);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the environment password when the file is deleted or corrupt", () => {
+    const { dataDir, auth } = tempAuth();
+    try {
+      auth.changePassword(OLD, NEW, null);
+      fs.writeFileSync(path.join(dataDir, "password.json"), "{broken");
+      assert.equal(new Auth({ password: OLD, dataDir }).verifyPassword(OLD), true);
+      fs.rmSync(path.join(dataDir, "password.json"));
+      assert.equal(new Auth({ password: OLD, dataDir }).verifyPassword(OLD), true);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses when the server has nowhere to store it", () => {
+    const auth = new Auth({ password: OLD });
+    assert.throws(() => auth.changePassword(OLD, NEW, null), /not available/);
+  });
+});

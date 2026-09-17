@@ -345,6 +345,7 @@
           <a href="#set-toolbar">Top bar</a>
           <a href="#set-newtab">New tab page</a>
           <a href="#set-browsing">Browsing</a>
+          <a href="#set-security">Security</a>
           <a href="#set-stream">Streaming</a>
           <a href="#set-about">About</a>
         </nav>
@@ -438,7 +439,8 @@
               <div class="set-row set-row-stack">
                 <span class="set-text"><span class="set-title">Background</span><span class="set-desc">Any photo works: it is resized and converted in your browser before upload, and always fills the page whatever its shape.</span></span>
                 <div class="bg-choices" role="radiogroup" aria-label="Background">
-                  <button type="button" class="bg-choice" data-bg="default" role="radio"><span class="bg-thumb bg-thumb-default"></span><span>Default</span></button>
+                  <button type="button" class="bg-choice" data-bg="dark" role="radio"><span class="bg-thumb bg-thumb-dark"></span><span>Dark</span></button>
+                  <button type="button" class="bg-choice" data-bg="light" role="radio"><span class="bg-thumb bg-thumb-light"></span><span>Light</span></button>
                   <button type="button" class="bg-choice" data-bg="custom" role="radio"><span class="bg-thumb bg-thumb-custom" id="bg-thumb-custom"></span><span>Your image</span></button>
                   <button type="button" class="bg-choice" data-bg="none" role="radio"><span class="bg-thumb bg-thumb-none"></span><span>None</span></button>
                 </div>
@@ -479,6 +481,48 @@
                 <span class="set-text"><span class="set-title">Block ads and trackers</span><span class="set-desc">Same switch as the shield button; applies to every device.</span></span>
                 <input type="checkbox" class="set-switch" id="set-adblock" />
               </label>
+            </div>
+          </section>
+
+          <section class="set-section" id="set-security">
+            <h3>Security</h3>
+            <p class="set-lead">The password that protects this Perch. Changing it signs out every other device.</p>
+            <div class="set-card">
+              <form class="set-row set-row-stack" id="pw-form" autocomplete="on">
+                <!-- Lets password managers file the new password under the right account. -->
+                <input type="text" name="username" id="pw-user" autocomplete="username" hidden />
+                <label class="pw-field">
+                  <span>Current password</span>
+                  <span class="pw-input">
+                    <input type="password" id="pw-current" autocomplete="current-password" spellcheck="false" autocapitalize="off" required />
+                    <button type="button" class="pw-reveal" data-reveal="pw-current" aria-label="Show current password" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                    </button>
+                  </span>
+                </label>
+                <label class="pw-field">
+                  <span>New password</span>
+                  <span class="pw-input">
+                    <input type="password" id="pw-new" autocomplete="new-password" spellcheck="false" autocapitalize="off" required />
+                    <button type="button" class="pw-reveal" data-reveal="pw-new" aria-label="Show new password" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                    </button>
+                  </span>
+                </label>
+                <label class="pw-field">
+                  <span>Confirm new password</span>
+                  <span class="pw-input">
+                    <input type="password" id="pw-confirm" autocomplete="new-password" spellcheck="false" autocapitalize="off" required />
+                    <button type="button" class="pw-reveal" data-reveal="pw-confirm" aria-label="Show confirm new password" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                    </button>
+                  </span>
+                </label>
+                <div class="set-actions">
+                  <button type="submit" class="set-btn set-btn-primary" id="pw-submit">Update password</button>
+                </div>
+                <p class="pw-status" id="pw-status" role="status" aria-live="polite" hidden></p>
+              </form>
             </div>
           </section>
 

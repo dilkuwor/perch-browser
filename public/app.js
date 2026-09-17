@@ -263,12 +263,26 @@
   const THEME_COLORS = { dark: "#07080b", light: "#e6eaf2" };
   const prefersLight = window.matchMedia("(prefers-color-scheme: light)");
 
+  // Bundled wallpapers: "dark" and "light" are explicit picks. "default" (from older
+  // settings) still follows the chrome theme. A custom image is left alone.
+  function applyWallpaper() {
+    const s = state.settings;
+    if (!s) return;
+    const bg = s.newTab.background;
+    const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    const bundled = bg === "dark" || bg === "light" ? bg : bg === "default" ? theme : "";
+    const url = bg === "custom" ? customBgUrl(s) : bundled ? `img/newtab-${bundled}.webp` : "";
+    startPage.classList.toggle("has-bg", Boolean(url));
+    startPage.style.setProperty("--start-bg", url ? `url("${url}")` : "none");
+  }
+
   function applyTheme(theme) {
     const choice = theme === "light" || theme === "system" ? theme : "dark";
     const resolved = choice === "system" ? (prefersLight.matches ? "light" : "dark") : choice;
     document.documentElement.dataset.theme = resolved;
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = THEME_COLORS[resolved];
+    applyWallpaper();
     for (const btn of settingsPage.querySelectorAll("[data-theme-choice]")) {
       btn.setAttribute("aria-checked", String(btn.dataset.themeChoice === choice));
     }
@@ -312,10 +326,7 @@
     }
     if (s.toolbar.latency === false) toggleLatency(false);
 
-    const bg = s.newTab.background;
-    const url = bg === "custom" ? customBgUrl(s) : bg === "default" ? "img/newtab-default.webp" : "";
-    startPage.classList.toggle("has-bg", Boolean(url));
-    startPage.style.setProperty("--start-bg", url ? `url("${url}")` : "none");
+    applyWallpaper();
     startPage.style.setProperty("--start-dim", String(s.newTab.dim / 100));
     startPage.classList.toggle("no-search", !s.newTab.search);
     startPage.classList.toggle("no-shortcuts", !s.newTab.shortcuts);
@@ -344,9 +355,11 @@
     for (const out of settingsPage.querySelectorAll("[data-output]")) {
       out.textContent = `${getPath(s, out.dataset.output)}${out.dataset.suffix || ""}`;
     }
+    const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    const selectedBg = s.newTab.background === "default" ? theme : s.newTab.background;
     for (const choice of settingsPage.querySelectorAll(".bg-choice")) {
       const kind = choice.dataset.bg;
-      choice.setAttribute("aria-checked", String(s.newTab.background === kind));
+      choice.setAttribute("aria-checked", String(selectedBg === kind));
       if (kind === "custom") choice.disabled = !state.hasCustomBg;
     }
     bgThumbCustom.style.backgroundImage = state.hasCustomBg ? `url("${customBgUrl(s)}")` : "";
@@ -431,6 +444,7 @@
     document.getElementById("about-ip").textContent = ipChip.textContent.replace(/^IP · /, "");
     try {
       const health = await api("/health");
+      if (health.user) document.getElementById("pw-user").value = health.user;
       document.getElementById("about-server").textContent =
         `build ${health.build ?? "?"} · ${(health.features || []).join(", ")}`;
     } catch {
@@ -531,6 +545,68 @@
 
   setAdblock.addEventListener("change", () => {
     sendWs({ type: "adblock", enabled: setAdblock.checked });
+  });
+
+  // ——— password ———
+
+  const pwForm = document.getElementById("pw-form");
+  const pwCurrent = document.getElementById("pw-current");
+  const pwNew = document.getElementById("pw-new");
+  const pwConfirm = document.getElementById("pw-confirm");
+  const pwSubmit = document.getElementById("pw-submit");
+  const pwStatus = document.getElementById("pw-status");
+
+  function pwMessage(text, isError) {
+    pwStatus.textContent = text;
+    pwStatus.classList.toggle("is-error", Boolean(isError));
+    pwStatus.hidden = !text;
+  }
+
+  for (const btn of pwForm.querySelectorAll("[data-reveal]")) {
+    btn.addEventListener("click", () => {
+      const input = document.getElementById(btn.dataset.reveal);
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.setAttribute("aria-pressed", String(show));
+    });
+  }
+
+  pwForm.addEventListener("input", () => {
+    pwMessage("");
+    for (const input of [pwCurrent, pwNew, pwConfirm]) input.classList.remove("is-invalid");
+  });
+
+  pwForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fail = (input, text) => {
+      input.classList.add("is-invalid");
+      input.focus();
+      pwMessage(text, true);
+    };
+    if (pwNew.value.trim() === "") return fail(pwNew, "New password cannot be blank");
+    if (pwNew.value === pwCurrent.value) return fail(pwNew, "New password must be different from the current one");
+    if (pwNew.value !== pwConfirm.value) return fail(pwConfirm, "The two new passwords do not match");
+
+    pwSubmit.disabled = true;
+    pwSubmit.textContent = "Updating…";
+    try {
+      const res = await api("/api/password", {
+        method: "POST",
+        body: JSON.stringify({ current: pwCurrent.value, next: pwNew.value }),
+      });
+      pwForm.reset();
+      for (const input of [pwCurrent, pwNew, pwConfirm]) input.type = "password";
+      for (const btn of pwForm.querySelectorAll("[data-reveal]")) btn.setAttribute("aria-pressed", "false");
+      const others = res.signedOut === 1 ? "1 other device was" : `${res.signedOut} other devices were`;
+      pwMessage(`Password updated. ${res.signedOut ? `${others} signed out.` : "You stay signed in here."}`);
+    } catch (err) {
+      if (err.status === 404) pwMessage(STALE_SERVER.replace("to use settings", "to change the password"), true);
+      else if (/current password/i.test(err.message)) fail(pwCurrent, err.message);
+      else pwMessage(err.message, true);
+    } finally {
+      pwSubmit.disabled = false;
+      pwSubmit.textContent = "Update password";
+    }
   });
 
   // Two-step so a stray click cannot wipe the wallpaper.
@@ -1462,10 +1538,17 @@
       sendResize(true);
       sendAudioPref();
     });
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (ev) => {
       if (gen !== state.wsGen) return;
       wsDot.classList.remove("on");
       resetAudioClock();
+      // 4001: the password was changed on another device and this session was ended.
+      if (ev.code === 4001) {
+        toggleSettings(false);
+        showLogin();
+        showError("The password was changed. Sign in again.");
+        return;
+      }
       if (appScreen.hidden) return;
       const wait = state.reconnectDelay;
       state.reconnectDelay = Math.min(state.reconnectDelay * 2, 8000);

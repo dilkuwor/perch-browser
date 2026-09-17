@@ -62,7 +62,9 @@ function sanitize(input, base) {
   for (const key of TOOLBAR_ITEMS) out.toolbar[key] = bool(toolbar[key], base.toolbar[key]);
 
   const newTab = src.newTab && typeof src.newTab === "object" ? src.newTab : {};
-  if (["default", "custom", "none"].includes(newTab.background)) out.newTab.background = newTab.background;
+  if (["default", "dark", "light", "custom", "none"].includes(newTab.background)) {
+    out.newTab.background = newTab.background;
+  }
   out.newTab.dim = clampInt(newTab.dim, 0, 80, base.newTab.dim);
   out.newTab.search = bool(newTab.search, base.newTab.search);
   out.newTab.shortcuts = bool(newTab.shortcuts, base.newTab.shortcuts);
