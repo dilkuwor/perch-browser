@@ -114,25 +114,6 @@ function userDataDir() {
   );
 }
 
-// --disable-dev-shm-usage moves Chromium's shared memory from /dev/shm to disk-backed
-// temp files. That is the right call under Docker's 64 MB default (Chromium crashes when
-// it fills up) and the wrong one when the container was given real room — compose and
-// the documented `docker run` both pass 1 GB — because RAM is much faster. So decide by
-// looking. CHROME_DEV_SHM=1/0 forces it either way.
-const DEV_SHM_MIN_BYTES = 512 * 1024 * 1024;
-
-function useDevShm(env = process.env, statfs = fs.statfsSync) {
-  if (env.CHROME_DEV_SHM === "1") return true;
-  if (env.CHROME_DEV_SHM === "0") return false;
-  if (process.platform !== "linux") return true; // the flag only means something on Linux
-  try {
-    const s = statfs("/dev/shm");
-    return Number(s.bsize) * Number(s.blocks) >= DEV_SHM_MIN_BYTES;
-  } catch {
-    return false;
-  }
-}
-
 function findChrome() {
   const fromEnv = process.env.CHROME_PATH && process.env.CHROME_PATH.trim();
   if (fromEnv) {
@@ -501,7 +482,7 @@ class HomeBrowser {
       const winW = this.headed ? MAX_VIEW_W : this.viewport.width;
       const winH = this.headed ? MAX_VIEW_H : this.viewport.height;
       const args = [
-        ...(useDevShm() ? [] : ["--disable-dev-shm-usage"]),
+        "--disable-dev-shm-usage",
         `--window-size=${winW},${winH}`,
         "--window-position=0,0",
         "--no-first-run",
@@ -708,9 +689,6 @@ class HomeBrowser {
         } else {
           // Chrome's cached target title is unreliable for background pages, so read the
           // document title directly (short timeout so a hung tab never stalls the list).
-          // Not cacheable either: Chrome also reports title *changes* seconds late (measured:
-          // ~4 s, for foreground and background tabs alike), so there is no event to
-          // invalidate a cache with.
           try {
             title = (await withTimeout(p.title(), 700, "")) || "";
           } catch {
@@ -964,7 +942,7 @@ class HomeBrowser {
   // ——— frames ———
 
   async _startScreencast() {
-    if (!this.paintCdp || this._screencastOn || this._viewers() === 0) return;
+    if (!this.paintCdp || this._screencastOn || this.clients.size === 0) return;
     this._screencastOn = true;
     try {
       await this.paintCdp.send("Page.startScreencast", {
@@ -998,7 +976,7 @@ class HomeBrowser {
 
   _onScreencastFrame(session, ev) {
     session.send("Page.screencastFrameAck", { sessionId: ev.sessionId }).catch(() => {});
-    if (session !== this.paintCdp || this._viewers() === 0 || !ev.data) return;
+    if (session !== this.paintCdp || this.clients.size === 0 || !ev.data) return;
     const meta = ev.metadata || {};
     this._sendFrame(
       Buffer.from(ev.data, "base64"),
@@ -1033,7 +1011,7 @@ class HomeBrowser {
   }
 
   _sendFrame(jpeg, epoch, width, height, only) {
-    if (!jpeg || this._viewers() === 0) return;
+    if (!jpeg || this.clients.size === 0) return;
     if (!this._frameLogged) {
       this._frameLogged = true;
       console.log("[home-browser] streaming frames");
@@ -1049,7 +1027,7 @@ class HomeBrowser {
   // socket is still busy, only the newest frame is kept, and it goes out the moment the
   // socket drains. Fast links never hit this path.
   _offerFrame(ws, payload) {
-    if (ws.readyState !== 1 || ws._hidden) return;
+    if (ws.readyState !== 1) return;
     if (ws.bufferedAmount > Math.max(FRAME_BACKLOG_MIN, payload.length)) {
       ws._heldFrame = payload;
       this._armFrameDrain(ws);
@@ -1181,34 +1159,8 @@ class HomeBrowser {
     clearInterval(ws._frameDrain);
     ws._frameDrain = null;
     ws._heldFrame = null;
-    if (this._viewers() === 0) this._stopScreencast().catch(() => {});
+    if (this.clients.size === 0) this._stopScreencast().catch(() => {});
     this._syncAudio();
-  }
-
-  // ——— viewers ———
-
-  // Clients that are actually looking. A phone with Perch in the background, or a laptop
-  // on another browser tab, is connected but not watching: it gets no frames, and when
-  // nobody is watching the screencast stops, so the home server stops encoding too.
-  // Sound is separate and keeps playing — music in a background tab is the point.
-  _viewers() {
-    let n = 0;
-    for (const ws of this.clients) if (!ws._hidden) n += 1;
-    return n;
-  }
-
-  async setClientHidden(ws, hidden) {
-    if (Boolean(ws._hidden) === hidden) return;
-    ws._hidden = hidden;
-    ws._heldFrame = null;
-    if (hidden) {
-      if (this._viewers() === 0) await this._stopScreencast();
-      return;
-    }
-    if (!this.ready) return;
-    await this._startScreencast();
-    // The screencast only emits on change; show the returning viewer the current page now.
-    await this._snapshot(ws);
   }
 
   // ——— settings ———
@@ -1427,9 +1379,6 @@ class HomeBrowser {
     }
     if (msg.type === "exitFullscreen") {
       return this.exitRemoteFullscreen();
-    }
-    if (msg.type === "visibility") {
-      return this.setClientHidden(ws, msg.hidden === true);
     }
     if (msg.type === "resize") {
       if (!this.ready) return Promise.resolve();
@@ -1703,7 +1652,6 @@ HomeBrowser.findChrome = findChrome;
 HomeBrowser.userDataDir = userDataDir;
 
 module.exports = {
-  useDevShm,
   HomeBrowser,
   resolveUrl,
   findChrome,

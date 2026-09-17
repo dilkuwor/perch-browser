@@ -472,15 +472,7 @@ class AdBlocker {
   async attach(page, { popup = false } = {}) {
     if (!this.enabled || !this.engine || !page || page.isClosed()) return;
     let ctx = this._contexts.get(page);
-    if (ctx) {
-      // HomeBrowser clears a page's "framenavigated"/"close" listeners each time the tab
-      // becomes active again, ours included; put them back.
-      for (const [event, handler] of [["framenavigated", ctx.onNavigated], ["close", ctx.onClose]]) {
-        page.off(event, handler);
-        page.on(event, handler);
-      }
-      return ctx.ready;
-    }
+    if (ctx) return ctx.ready;
     ctx = {
       page,
       blocked: 0,
@@ -503,7 +495,7 @@ class AdBlocker {
         ctx.agentId = identifier;
         page.on("request", ctx.onRequest);
         page.on("framenavigated", ctx.onNavigated);
-        page.on("close", ctx.onClose);
+        page.once("close", ctx.onClose);
         await page.setRequestInterception(true);
         // Puppeteer only intercepts at the request stage. Documents are also paused at
         // the response stage, on a session of our own, to splice the bootstrap in.
