@@ -9,6 +9,7 @@ const { FiltersEngine, Request, fullLists, fetchResources } = require("@ghostery
 const { agent } = require("./adblock-agent");
 
 const ENGINE_FILE = "engine.bin";
+const ENGINE_RECIPE_FILE = "engine.recipe";
 const STATE_FILE = "state.json";
 const CUSTOM_FILTERS_FILE = "custom-filters.txt";
 const FETCH_TIMEOUT_MS = 30_000;
@@ -42,6 +43,39 @@ const EXTENDED_LIB_SOURCE = (() => {
     return "function(){throw new Error('extended selectors unavailable')}";
   }
 })();
+
+// uBlock Origin publishes its site-specific fixes — anti-adblock walls, YouTube, video
+// players — in one file per year (filters-2025.txt, filters-2026.txt …). The engine's
+// built-in list set is frozen at the year that library version shipped, so without this
+// every fix written since then is simply missing: that is how Dailymotion's detector got
+// through. Years the mirror does not have (yet) just 404 and are skipped quietly.
+const UBO_MIRROR = "https://raw.githubusercontent.com/ghostery/adblocker/master/packages/adblocker/assets/ublock-origin";
+const UBO_UPSTREAM = "https://ublockorigin.github.io/uAssets/filters";
+const UBO_YEARLY_SINCE = 2020;
+
+function yearlyUboLists(now = new Date()) {
+  const known = new Set(fullLists);
+  const out = [];
+  for (let year = UBO_YEARLY_SINCE; year <= now.getUTCFullYear(); year += 1) {
+    const url = `${UBO_MIRROR}/filters-${year}.txt`;
+    if (!known.has(url)) out.push({ url, fallback: `${UBO_UPSTREAM}/filters-${year}.txt`, optional: true });
+  }
+  return out;
+}
+
+// The day-to-day arms race (YouTube above all) is fought in quick-fixes.txt, where a fix
+// can be hours old. The mirror trails upstream, so this one is also read from the source;
+// rules present in both are de-duplicated by the engine.
+const FRESH_LISTS = [{ url: `${UBO_UPSTREAM}/quick-fixes.txt`, optional: true }];
+
+async function fetchList(list) {
+  try {
+    return await fetchText(list.url);
+  } catch (err) {
+    if (list.fallback) return fetchText(list.fallback);
+    throw err;
+  }
+}
 
 function extraListUrls() {
   return String(process.env.ADBLOCK_EXTRA_LISTS || "")
@@ -235,12 +269,18 @@ class AdBlocker {
   // ——— engine ———
 
   async _buildEngine() {
-    const urls = [...fullLists, ...extraListUrls()];
-    const results = await Promise.allSettled(urls.map(fetchText));
+    const sources = [
+      ...fullLists.map((url) => ({ url })),
+      ...yearlyUboLists(),
+      ...FRESH_LISTS,
+      ...extraListUrls().map((url) => ({ url })),
+    ];
+    const urls = sources.map((s) => s.url);
+    const results = await Promise.allSettled(sources.map(fetchList));
     const lists = [];
     results.forEach((r, i) => {
       if (r.status === "fulfilled") lists.push(r.value);
-      else console.error(`[adblock] list failed: ${urls[i]} (${r.reason && r.reason.message})`);
+      else if (!sources[i].optional) console.error(`[adblock] list failed: ${urls[i]} (${r.reason && r.reason.message})`);
     });
     if (lists.length === 0) throw new Error("no filter list could be downloaded");
     const custom = this._file(CUSTOM_FILTERS_FILE);
@@ -259,10 +299,18 @@ class AdBlocker {
     return engine;
   }
 
+  // Which lists (and engine options) a cached engine was built from. When a Perch update
+  // changes the recipe, the cache is stale by definition — rebuild now, not in a day.
+  _recipe() {
+    const urls = [...fullLists, ...yearlyUboLists().map((l) => l.url), ...FRESH_LISTS.map((l) => l.url), ...extraListUrls()];
+    return crypto.createHash("sha256").update(JSON.stringify([urls, ENGINE_CONFIG])).digest("hex");
+  }
+
   _readCachedEngine() {
     const file = this._file(ENGINE_FILE);
     if (!file) return null;
     try {
+      if (fs.readFileSync(this._file(ENGINE_RECIPE_FILE), "utf8").trim() !== this._recipe()) return null;
       const engine = FiltersEngine.deserialize(fs.readFileSync(file));
       this.builtAt = fs.statSync(file).mtimeMs;
       return engine;
@@ -280,6 +328,7 @@ class AdBlocker {
       const tmp = `${file}.tmp`;
       fs.writeFileSync(tmp, engine.serialize());
       fs.renameSync(tmp, file);
+      fs.writeFileSync(this._file(ENGINE_RECIPE_FILE), this._recipe());
     } catch (err) {
       console.error(`[adblock] could not cache engine: ${err.message}`);
     }
@@ -791,4 +840,4 @@ ${scriptlets}
   }
 }
 
-module.exports = { AdBlocker, requestType, frameUrl, patchCsp, injectIntoHtml, toInlineScript };
+module.exports = { AdBlocker, yearlyUboLists, requestType, frameUrl, patchCsp, injectIntoHtml, toInlineScript };

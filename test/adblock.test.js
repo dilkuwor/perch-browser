@@ -7,7 +7,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { FiltersEngine } = require("@ghostery/adblocker");
-const { AdBlocker, requestType, frameUrl, patchCsp, injectIntoHtml, toInlineScript } = require("../src/adblock");
+const { AdBlocker, yearlyUboLists, requestType, frameUrl, patchCsp, injectIntoHtml, toInlineScript } = require("../src/adblock");
 
 // A tiny inline list keeps these tests off the network.
 const FILTERS = [
@@ -144,5 +144,44 @@ describe("state", () => {
     assert.equal(ab.state(null).status, "off");
     assert.ok(changes.length >= 2);
     ab.stop();
+  });
+});
+
+describe("filter list set", () => {
+  it("adds every yearly uBlock file the engine library does not know about, up to this year", () => {
+    const urls = yearlyUboLists(new Date("2027-03-01T00:00:00Z")).map((l) => l.url.split("/").pop());
+    assert.deepEqual(urls, ["filters-2025.txt", "filters-2026.txt", "filters-2027.txt"]);
+  });
+
+  it("never requests a list twice, and marks the extra years as optional", () => {
+    const { fullLists } = require("@ghostery/adblocker");
+    for (const list of yearlyUboLists()) {
+      assert.ok(!fullLists.includes(list.url));
+      assert.equal(list.optional, true);
+      assert.match(list.fallback, /^https:\/\/ublockorigin\.github\.io\//);
+    }
+  });
+
+  it("rebuilds a cached engine whose recipe no longer matches", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perch-adblock-test-"));
+    try {
+      const ab = blocker({ dataDir: dir });
+      ab._writeCachedEngine(ab.engine);
+      assert.ok(blocker({ dataDir: dir })._readCachedEngine(), "a matching recipe is reused");
+      fs.writeFileSync(path.join(dir, "engine.recipe"), "built-from-an-older-list-set");
+      assert.equal(blocker({ dataDir: dir })._readCachedEngine(), null);
+      fs.rmSync(path.join(dir, "engine.recipe"));
+      assert.equal(blocker({ dataDir: dir })._readCachedEngine(), null, "pre-recipe caches count as stale");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("honours a site's generic-hide exception (what un-trips bait-element detectors)", () => {
+    const engine = FiltersEngine.parse(["##[data-ad-slot]", "@@||video.example^$ghide", "video.example##.real-ad"].join("\n"));
+    const ab = new AdBlocker({ engine });
+    assert.equal(ab.cosmetics("https://video.example/watch").opts.generic, false);
+    assert.match(ab.cosmetics("https://video.example/watch").opts.css, /\.real-ad/);
+    assert.equal(ab.cosmetics("https://other.example/").opts.generic, true);
   });
 });
