@@ -467,6 +467,24 @@ body.is-focus .statusbar {
   display: none;
 }
 
+/* A remote video is fullscreen: nothing but the stream, edge to edge. */
+body.is-immersive .titlebar,
+body.is-immersive .toolbar,
+body.is-immersive .statusbar {
+  display: none;
+}
+
+body.is-immersive .app-screen {
+  padding: 0;
+}
+
+body.is-immersive .browser-window {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
 .titlebar {
   display: flex;
   align-items: center;

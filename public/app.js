@@ -95,6 +95,8 @@
     tabsUnsupported: false,
     latencyTimer: null,
     adblock: false,
+    remoteFs: false,
+    fsByRemote: false,
     settings: null,
     settingsOpen: false,
     hasCustomBg: false,
@@ -1551,8 +1553,43 @@
     const on = isFullscreen();
     document.body.classList.toggle("is-fullscreen", on);
     btnFullscreen.classList.toggle("is-on", on);
+    // Left fullscreen here (Esc, swipe, back) while the remote video is still in it:
+    // take the remote page out too, or its player keeps its fullscreen layout.
+    if (!on && state.remoteFs) {
+      state.fsByRemote = false;
+      sendWs({ type: "exitFullscreen" });
+    }
     sendResize();
   });
+
+  // A remote page went fullscreen (a video's maximize button). That only fills the
+  // *remote* view, so mirror it here: hide Perch's chrome so the stream fills the window,
+  // and ask this browser for real fullscreen. The request is honoured because the tap on
+  // the video's button was a user gesture in this browser a moment ago; where it is not
+  // (another device watching, or iPhone Safari, which has no element fullscreen) the
+  // chrome-less "immersive" view is still the largest picture available.
+  async function mirrorRemoteFullscreen(on) {
+    state.remoteFs = on;
+    document.body.classList.toggle("is-immersive", on);
+    if (on) {
+      toggleTools(false);
+      toggleLatency(false);
+      if (!isFullscreen() && shell.requestFullscreen) {
+        try {
+          await shell.requestFullscreen({ navigationUI: "hide" });
+          state.fsByRemote = true;
+        } catch {
+          // no recent gesture, or unsupported: immersive view only
+        }
+      }
+    } else if (state.fsByRemote) {
+      state.fsByRemote = false;
+      if (isFullscreen()) await document.exitFullscreen().catch(() => {});
+    }
+    // No explicit resize here. The viewport's ResizeObserver sends one, debounced, once
+    // the layout has settled — resizing the remote view in the middle of its fullscreen
+    // transition makes Chromium drop back out of fullscreen.
+  }
 
   // ——— socket ———
 
@@ -1594,6 +1631,8 @@
       if (gen !== state.wsGen) return;
       wsDot.classList.remove("on");
       resetAudioClock();
+      // Never strand the user in a chrome-less view with a dead connection.
+      if (state.remoteFs) mirrorRemoteFullscreen(false);
       // 4001: the password was changed on another device and this session was ended.
       if (ev.code === 4001) {
         toggleSettings(false);
@@ -1652,6 +1691,10 @@
       }
       if (msg.type === "settings") {
         applySettings(msg);
+        return;
+      }
+      if (msg.type === "fullscreen") {
+        mirrorRemoteFullscreen(msg.on === true);
         return;
       }
       if (msg.type === "pong") {
@@ -1955,7 +1998,13 @@
       return;
     }
     if (handleShortcut(e)) return;
-    if (e.key === "Escape" && isFullscreen()) return;
+    if (e.key === "Escape" && isFullscreen()) {
+      // Browsers leave fullscreen on Esc by themselves; asking too is harmless and covers
+      // the ones that hand the key to the page instead. The fullscreenchange handler
+      // then takes the remote video out of fullscreen as well.
+      if (state.remoteFs) document.exitFullscreen().catch(() => {});
+      return;
+    }
     if (!state.live) return;
     if (isTypingTarget(e.target)) return;
     if (e.target === kbd) {

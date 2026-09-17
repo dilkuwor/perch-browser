@@ -82,6 +82,15 @@ describe("buildUaOverride", () => {
   });
 });
 
+describe("key events and fullscreen", () => {
+  it("never marks a key event as native (Chromium re-injects those when a handler goes fullscreen)", () => {
+    const ev = keyEvents({ type: "key", action: "down", key: "f", code: "KeyF", keyCode: 70 });
+    assert.equal("nativeVirtualKeyCode" in ev.down, false);
+    assert.equal("nativeVirtualKeyCode" in ev.up, false);
+    assert.equal(ev.down.windowsVirtualKeyCode, 70);
+  });
+});
+
 describe("frame backpressure", () => {
   const { HomeBrowser } = require("../src/browser");
 

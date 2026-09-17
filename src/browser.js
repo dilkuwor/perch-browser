@@ -21,6 +21,7 @@ const NAVIGATE_REPLY_MS = 3_000;
 const META_POLL_MS = 1_000;
 const INPUT_QUEUE_MAX = 128;
 
+const crypto = require("crypto");
 const { AudioStreamer, AUDIO_FORMATS } = require("./audio");
 const { AdBlocker } = require("./adblock");
 
@@ -45,6 +46,27 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ].filter(Boolean);
+
+// Runs in the remote page. Reports fullscreen changes through a CDP binding, which it
+// removes from `window` straight away so pages cannot see it. Re-runnable: a fresh CDP
+// session (tab switch) brings a fresh binding, and the old listener is swapped out.
+function hookFullscreen(name) {
+  const report = window[name];
+  if (typeof report !== "function") return Boolean(document.fullscreenElement);
+  delete window[name];
+  const key = Symbol.for(name);
+  if (document[key]) document.removeEventListener("fullscreenchange", document[key], true);
+  const handler = () => {
+    try {
+      report(document.fullscreenElement ? "1" : "0");
+    } catch {
+      // the session that owned this binding is gone
+    }
+  };
+  Object.defineProperty(document, key, { value: handler, configurable: true });
+  document.addEventListener("fullscreenchange", handler, true);
+  return Boolean(document.fullscreenElement);
+}
 
 function userDataDir() {
   return (
@@ -285,7 +307,10 @@ function keyEvents(msg, opts = {}) {
     code,
     modifiers,
     windowsVirtualKeyCode: vk,
-    nativeVirtualKeyCode: vk,
+    // No nativeVirtualKeyCode. With it, Chromium treats the event as a native one and,
+    // when the page's handler changes the window state — YouTube's "f" for fullscreen —
+    // re-injects it in a loop: hundreds of keydowns from a single press. Puppeteer
+    // leaves it out for the same reason.
   };
   const down = {
     ...base,
@@ -378,6 +403,9 @@ class HomeBrowser {
     this._lastActive = null;
     this.audioEnabled = String(process.env.AUDIO || "1") !== "0";
     this._audio = {};
+    this.remoteFullscreen = false;
+    this._fsBinding = `__f${crypto.randomBytes(9).toString("hex")}`;
+    this._fsHooked = new WeakSet();
     this.adblock = new AdBlocker({
       // Lives inside the Chrome profile so it shares its volume/persistence.
       dataDir: path.join(userDataDir(), "perch-adblock"),
@@ -758,6 +786,8 @@ class HomeBrowser {
       if (frame === page.mainFrame()) {
         this._commitDone();
         this._scheduleMeta();
+        // A new document is never fullscreen, and no fullscreenchange fires for it.
+        this._setRemoteFullscreen(false);
       }
     });
     page.on("load", () => {
@@ -794,7 +824,44 @@ class HomeBrowser {
     // Pages should believe they are the focused window even in headless mode.
     await input.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
     paint.on("Page.screencastFrame", (ev) => this._onScreencastFrame(paint, ev));
+    await this._watchFullscreen(page, input).catch(() => {});
     if (this.clients.size > 0) await this._startScreencast();
+  }
+
+  // ——— fullscreen ———
+  //
+  // A video's fullscreen button only makes it fill the *remote* view; the device in the
+  // user's hand knows nothing about it. So the remote page reports the change here and
+  // every client mirrors it (real fullscreen where the browser allows, chrome hidden
+  // everywhere else).
+  async _watchFullscreen(page, session) {
+    await session.send("Runtime.enable");
+    await session.send("Runtime.addBinding", { name: this._fsBinding });
+    session.on("Runtime.bindingCalled", (ev) => {
+      if (ev.name !== this._fsBinding || this.inputCdp !== session) return;
+      this._setRemoteFullscreen(ev.payload === "1");
+    });
+    if (!this._fsHooked.has(page)) {
+      this._fsHooked.add(page);
+      await page.evaluateOnNewDocument(hookFullscreen, this._fsBinding);
+    }
+    const on = await page.evaluate(hookFullscreen, this._fsBinding).catch(() => false);
+    this._setRemoteFullscreen(Boolean(on));
+  }
+
+  _setRemoteFullscreen(on) {
+    if (this.remoteFullscreen === on) return;
+    this.remoteFullscreen = on;
+    this.broadcast({ type: "fullscreen", on });
+  }
+
+  // The user left fullscreen locally (Esc, the system gesture, the back button): the
+  // remote page has to follow, or its player stays in fullscreen layout.
+  async exitRemoteFullscreen() {
+    if (!this.page || !this.remoteFullscreen) return;
+    await this.page
+      .evaluate(() => (document.fullscreenElement ? document.exitFullscreen() : undefined))
+      .catch(() => {});
   }
 
   async _switchAway(closedPage) {
@@ -1035,6 +1102,7 @@ class HomeBrowser {
     try {
       ws.send(JSON.stringify({ type: "meta", ...this.lastMeta }));
       ws.send(JSON.stringify({ type: "adblock", ...this.adblock.state(this.page) }));
+      if (this.remoteFullscreen) ws.send(JSON.stringify({ type: "fullscreen", on: true }));
     } catch {
       // ignore
     }
@@ -1259,6 +1327,9 @@ class HomeBrowser {
     }
     if (msg.type === "adblock") {
       return this.setAdblock(msg.enabled === true);
+    }
+    if (msg.type === "exitFullscreen") {
+      return this.exitRemoteFullscreen();
     }
     if (msg.type === "resize") {
       if (!this.ready) return Promise.resolve();
