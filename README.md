@@ -26,7 +26,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 - **Tabs.** A real tab strip to open, switch, and close tabs. Popups and SSO windows take over the view and hand it back when closed.
 - **Non-blocking navigation.** Keep full mouse and keyboard control while a page loads, with no stale frames after a URL change.
 - **Sign-in friendly.** Real key events, hover-before-click, and no automation banner, so Google's "are you human?" checks and corporate SSO behave like a local browser.
-- **Phone-ready.** Touch scrolling, tap-to-click, long-press right-click, an on-screen keyboard, and a viewport sized to your screen.
+- **Phone-ready, and installable.** Touch scrolling, tap-to-click, long-press right-click, an on-screen keyboard, and a viewport sized to your screen. Add it to your home screen and it runs as a full-screen app (PWA).
 - **Single session.** One shared browser; a second login joins — and can take over — the same tabs and cookies.
 
 ## Table of contents
@@ -267,6 +267,20 @@ The speedometer icon in the title bar opens a panel with live connection stats: 
 - One finger drags to scroll, a still tap clicks, and a long press right-clicks.
 - Tapping a text field raises the on-screen keyboard automatically. The keyboard button in the toolbar raises it manually — useful for fields inside cross-origin iframes, where the server cannot tell what has focus.
 - The remote viewport is sized to your screen (down to 360 px wide), so responsive sites render their mobile layout instead of a shrunken desktop page.
+- On a phone the title bar keeps your tabs, and the tools (latency, ad blocker, sound, settings, sign out …) sit behind the **⋯** button.
+
+### Install as an app (PWA)
+
+Perch is a Progressive Web App. In Chrome or Edge use **Install app** (address bar or menu); in Safari on iPhone or iPad use **Share → Add to Home Screen**. It then opens in its own window with its own icon, without the browser's address bar, and respects the notch and home indicator.
+
+Browsers only allow installation — and the service worker behind it — on **HTTPS** or `localhost`. Over plain `http://192.168.x.x` Perch works exactly the same in a tab; it just cannot be installed. See [Reverse proxy (TLS)](#reverse-proxy-tls).
+
+### Speed and caching
+
+- **Nothing is downloaded twice, nothing is ever stale.** Scripts, styles, icons and wallpapers are served under a hash of their content (`/app.js?v=3f9c…`) and cached permanently; the small page that names them is never cached. An update therefore appears on the very next load — no hard refresh, no clearing caches — while a repeat visit transfers a few kilobytes. Text is pre-compressed with Brotli (gzip as fallback).
+- **The service worker cannot pin you to an old version.** It stores only those hashed files, always fetches pages from the server, and never touches the API or the live stream. If the home server is unreachable it shows a plain "can't reach your Perch" page with a retry button.
+- **Slow links stay current instead of falling behind.** While a connection is still busy delivering a frame, the server holds only the newest one and drops the rest, so a phone on mobile data sees fewer frames rather than an ever-growing delay. On a fast link nothing is dropped.
+- The app opens as soon as your session is confirmed; the home IP (an outside lookup) fills in afterwards.
 
 ### Google "are you a human?" and corporate sign-in
 

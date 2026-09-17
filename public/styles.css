@@ -83,6 +83,28 @@ body {
   margin: 0;
 }
 
+html {
+  /* Phones must not inflate text on rotation. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  /* No rubber-banding or pull-to-refresh: this is an app surface, and a stray refresh
+     would drop the live stream. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Removes the double-tap-to-zoom wait, so taps on controls register immediately. */
+button,
+a,
+input,
+select,
+label {
+  touch-action: manipulation;
+}
+
 body {
   font-family: var(--font);
   color: var(--text);
@@ -404,6 +426,8 @@ input {
   position: relative;
   width: min(1200px, 100%);
   height: min(820px, calc(100vh - 56px));
+  /* dvh tracks mobile browsers' collapsing toolbars; vh above is the fallback. */
+  height: min(820px, calc(100dvh - 56px));
   background: var(--window);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -729,6 +753,12 @@ body.is-focus .statusbar {
 .titlebar-actions {
   display: flex;
   gap: 4px;
+}
+
+/* Phones only (see the small-screen block): opens the tools tray. */
+.more-btn {
+  display: none;
+  flex-shrink: 0;
 }
 
 .icon-btn {
@@ -1884,6 +1914,96 @@ label.set-row {
 }
 
 @media (max-width: 720px) {
+  /* Installed to the home screen the page runs edge to edge, under the notch and the
+     home indicator; keep the controls out from under them. */
+  .app-screen {
+    height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+  }
+
+  /* The title bar keeps what a phone needs at all times — tabs and "new tab" — and the
+     tools move into a tray behind "⋯", instead of eight icons squeezing the tabs away. */
+  .traffic-lights,
+  .titlebar-flex,
+  #btn-maximize {
+    display: none;
+  }
+
+  .titlebar {
+    position: relative;
+    gap: 4px;
+    padding: 0 6px 0 8px;
+  }
+
+  .tabstrip {
+    flex: 1 1 auto;
+  }
+
+  .more-btn {
+    display: grid;
+    width: 38px;
+    height: 38px;
+  }
+
+  .titlebar-actions {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 6px;
+    z-index: 40;
+    gap: 2px;
+    padding: 6px;
+    border-radius: 14px;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-pop);
+  }
+
+  .titlebar.is-tools-open .titlebar-actions {
+    display: flex;
+  }
+
+  /* Finger-sized targets. */
+  .titlebar-actions .icon-btn {
+    width: 42px;
+    height: 42px;
+  }
+
+  .toolbar {
+    gap: 4px;
+    padding: 6px 6px;
+  }
+
+  .toolbar .icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  /* The keyboard's own Go/Enter key submits; the space is better spent on the address. */
+  .go-btn {
+    display: none;
+  }
+
+  .toolbar .nav {
+    gap: 0;
+  }
+
+  /* Anchor the stats panel to the tray, not to its first button, so it stays on screen. */
+  .latency-wrap {
+    position: static;
+  }
+
+  /* iOS zooms the whole page into any field whose text is smaller than 16px. */
+  .omnibox-input,
+  .start-search input,
+  .field input,
+  .set-input,
+  .set-select,
+  .pw-input input {
+    font-size: 16px;
+  }
+
   .settings-page {
     flex-direction: column;
   }
@@ -1910,10 +2030,6 @@ label.set-row {
 
   .set-range input {
     width: 110px;
-  }
-
-  .app-screen {
-    padding: 0;
   }
 
   .browser-window {

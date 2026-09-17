@@ -13,6 +13,9 @@ const MAX_VIEW_W = 1920;
 const MAX_VIEW_H = 1080;
 const RESTART_DELAY_MS = 1500;
 const WS_BACKPRESSURE = 1_500_000;
+// A frame is only handed to a socket that has (nearly) finished sending the last one.
+const FRAME_BACKLOG_MIN = 48 * 1024;
+const FRAME_DRAIN_MS = 8;
 const COMMIT_FALLBACK_MS = 20_000;
 const NAVIGATE_REPLY_MS = 3_000;
 const META_POLL_MS = 1_000;
@@ -909,15 +912,47 @@ class HomeBrowser {
     }
     const payload = encodeFrame(jpeg, epoch, width, height);
     const targets = only ? [only] : this.clients;
-    for (const ws of targets) {
-      if (ws.readyState === 1 && ws.bufferedAmount < WS_BACKPRESSURE) {
-        try {
-          ws.send(payload, { binary: true });
-        } catch {
-          // ignore
-        }
-      }
+    for (const ws of targets) this._offerFrame(ws, payload);
+  }
+
+  // Latest frame wins, per client. Queuing frames behind a slow link (phone on mobile
+  // data) is what turns a slow connection into a laggy one: every queued frame is an
+  // old picture that still has to be delivered before the current one. So while a
+  // socket is still busy, only the newest frame is kept, and it goes out the moment the
+  // socket drains. Fast links never hit this path.
+  _offerFrame(ws, payload) {
+    if (ws.readyState !== 1) return;
+    if (ws.bufferedAmount > Math.max(FRAME_BACKLOG_MIN, payload.length)) {
+      ws._heldFrame = payload;
+      this._armFrameDrain(ws);
+      return;
     }
+    ws._heldFrame = null;
+    try {
+      ws.send(payload, { binary: true });
+    } catch {
+      // ignore
+    }
+  }
+
+  _armFrameDrain(ws) {
+    if (ws._frameDrain) return;
+    ws._frameDrain = setInterval(() => {
+      const held = ws._heldFrame;
+      if (ws.readyState !== 1 || !held) {
+        clearInterval(ws._frameDrain);
+        ws._frameDrain = null;
+        ws._heldFrame = null;
+        return;
+      }
+      if (ws.bufferedAmount > FRAME_BACKLOG_MIN) return;
+      ws._heldFrame = null;
+      try {
+        ws.send(held, { binary: true });
+      } catch {
+        // ignore
+      }
+    }, FRAME_DRAIN_MS);
   }
 
   broadcast(obj) {
@@ -1014,6 +1049,9 @@ class HomeBrowser {
 
   removeClient(ws) {
     this.clients.delete(ws);
+    clearInterval(ws._frameDrain);
+    ws._frameDrain = null;
+    ws._heldFrame = null;
     if (this.clients.size === 0) this._stopScreencast().catch(() => {});
     this._syncAudio();
   }

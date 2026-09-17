@@ -81,3 +81,56 @@ describe("buildUaOverride", () => {
     assert.equal(out.metadata.mobile, false);
   });
 });
+
+describe("frame backpressure", () => {
+  const { HomeBrowser } = require("../src/browser");
+
+  function fakeSocket() {
+    return {
+      readyState: 1,
+      bufferedAmount: 0,
+      sent: [],
+      send(payload) {
+        this.sent.push(payload);
+      },
+    };
+  }
+
+  it("sends straight through while the socket keeps up", () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const ws = fakeSocket();
+    browser._offerFrame(ws, Buffer.alloc(80_000, 1));
+    browser._offerFrame(ws, Buffer.alloc(80_000, 2));
+    assert.equal(ws.sent.length, 2);
+    browser.adblock.stop();
+  });
+
+  it("keeps only the newest frame behind a slow socket and sends it once it drains", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const ws = fakeSocket();
+    ws.bufferedAmount = 900_000; // a phone on a bad link: earlier frames still queued
+    for (let i = 1; i <= 5; i += 1) browser._offerFrame(ws, Buffer.alloc(80_000, i));
+    assert.equal(ws.sent.length, 0, "nothing is piled onto a busy socket");
+
+    ws.bufferedAmount = 0;
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(ws.sent.length, 1, "the stale frames were dropped, not delivered late");
+    assert.equal(ws.sent[0][0], 5, "and the one delivered is the newest");
+
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(ws._frameDrain, null, "the drain timer stops once there is nothing held");
+    browser.adblock.stop();
+  });
+
+  it("stops watching a socket that went away", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const ws = fakeSocket();
+    ws.bufferedAmount = 900_000;
+    browser._offerFrame(ws, Buffer.alloc(80_000, 1));
+    browser.removeClient(ws);
+    ws.bufferedAmount = 0;
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(ws.sent.length, 0);
+    browser.adblock.stop();
+  });
+});

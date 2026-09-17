@@ -10,6 +10,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const { Auth, clientIp } = require("./auth");
 const { HomeBrowser, resolveUrl } = require("./browser");
 const { Settings, SEARCH_ENGINES, BACKGROUND_MAX_BYTES } = require("./settings");
+const { StaticAssets } = require("./static");
 
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const APP_USER = process.env.APP_USER || "admin";
@@ -83,7 +84,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     status: "ok",
     build: BUILD,
-    features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", ...(browser.audioEnabled ? ["audio"] : [])],
+    features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", ...(browser.audioEnabled ? ["audio"] : [])],
     chromium: browser.ready,
     audio: browser.audioEnabled ? (browser.audioActive ? "streaming" : "idle") : "disabled",
     user: APP_USER,
@@ -149,6 +150,12 @@ app.post("/api/logout", (req, res) => {
   auth.destroySession(token);
   auth.clearSessionCookie(req, res);
   res.json({ ok: true });
+});
+
+// Cheap "am I signed in?" for start-up. /api/ip answers the same question but waits on
+// an outside IP lookup first, which can take seconds.
+app.get("/api/session", auth.requireAuth.bind(auth), (req, res) => {
+  res.json({ ok: true, user: req.session.user });
 });
 
 app.get("/api/ip", auth.requireAuth.bind(auth), async (_req, res) => {
@@ -261,26 +268,20 @@ app.post("/api/tab", auth.requireAuth.bind(auth), async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, "..", "public"), {
-  etag: true,
-  maxAge: 0,
-  index: "index.html",
-  setHeaders(res, file) {
-    // no-store, not no-cache: some phones and reverse proxies keep serving a cached
-    // app.js under no-cache. no-store guarantees a fresh client on every load.
-    // Artwork is the exception — no reason to re-download the wallpaper on every visit.
-    const image = file.includes(`${path.sep}img${path.sep}`);
-    res.setHeader("Cache-Control", image ? "public, max-age=86400" : "no-store, must-revalidate");
-  },
-}));
+const assets = new StaticAssets(path.join(__dirname, "..", "public"));
+app.use(assets.middleware());
 
 app.use((req, res) => {
   if (req.path.startsWith("/api/") || req.path === "/ws") {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  res.setHeader("Cache-Control", "no-store, must-revalidate");
-  res.sendFile(path.join(__dirname, "..", "public", "index.html"));
+  // A missing file must not come back as HTML under a script or image URL.
+  if (/\.[a-z0-9]{2,5}$/i.test(req.path)) {
+    res.status(404).type("text/plain").send("Not found");
+    return;
+  }
+  assets.sendHtml(req, res);
 });
 
 // Body-parser failures (oversized upload, malformed JSON) as JSON, like every other error.

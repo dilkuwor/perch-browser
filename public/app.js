@@ -263,6 +263,13 @@
   const THEME_COLORS = { dark: "#07080b", light: "#e6eaf2" };
   const prefersLight = window.matchMedia("(prefers-color-scheme: light)");
 
+  // Bundled images carry their content hash, so they are cached forever yet a replaced
+  // file shows up at once (the hashes arrive with the page, in window.__PERCH).
+  function assetUrl(rel) {
+    const hash = window.__PERCH && window.__PERCH.assets && window.__PERCH.assets[rel];
+    return hash ? `${rel}?v=${hash}` : rel;
+  }
+
   // Bundled wallpapers: "dark" and "light" are explicit picks. "default" (from older
   // settings) still follows the chrome theme. A custom image is left alone.
   function applyWallpaper() {
@@ -271,7 +278,7 @@
     const bg = s.newTab.background;
     const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
     const bundled = bg === "dark" || bg === "light" ? bg : bg === "default" ? theme : "";
-    const url = bg === "custom" ? customBgUrl(s) : bundled ? `img/newtab-${bundled}.webp` : "";
+    const url = bg === "custom" ? customBgUrl(s) : bundled ? assetUrl(`img/newtab-${bundled}.webp`) : "";
     startPage.classList.toggle("has-bg", Boolean(url));
     startPage.style.setProperty("--start-bg", url ? `url("${url}")` : "none");
   }
@@ -509,6 +516,33 @@
   // The shortcut hint names the modifier this device actually has.
   const IS_APPLE = /mac|iphone|ipad/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "");
   document.getElementById("start-kbd").textContent = IS_APPLE ? "⌘ K" : "Ctrl K";
+
+  // ——— phone: tools live behind a "⋯" button ———
+
+  const btnMore = document.getElementById("btn-more");
+  const titlebarEl = document.getElementById("titlebar");
+
+  function toggleTools(show) {
+    const on = show == null ? !titlebarEl.classList.contains("is-tools-open") : show;
+    titlebarEl.classList.toggle("is-tools-open", on);
+    btnMore.classList.toggle("is-on", on);
+    btnMore.setAttribute("aria-expanded", String(on));
+    if (!on) toggleLatency(false);
+  }
+
+  btnMore.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleTools();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!titlebarEl.classList.contains("is-tools-open")) return;
+    if (e.target.closest("#titlebar-actions") || e.target.closest("#btn-more")) return;
+    toggleTools(false);
+  });
+  // Opening settings, going fullscreen or signing out should not leave the tray hanging.
+  for (const id of ["btn-settings", "btn-fullscreen", "btn-logout", "btn-focus"]) {
+    document.getElementById(id).addEventListener("click", () => toggleTools(false));
+  }
 
   btnSettings.addEventListener("click", () => toggleSettings());
   document.getElementById("settings-close").addEventListener("click", () => toggleSettings(false));
@@ -1298,12 +1332,20 @@
     return body;
   }
 
+  // The app opens as soon as the session is confirmed; the home IP (an outside lookup
+  // that can take seconds) is filled in afterwards by refreshIp().
   async function checkSession() {
     try {
-      const data = await api("/api/ip");
-      enterApp(data.egress_ip);
-    } catch {
-      showLogin();
+      await api("/api/session");
+      enterApp();
+    } catch (err) {
+      if (err.status !== 404) return showLogin();
+      // A server from before /api/session existed.
+      try {
+        enterApp((await api("/api/ip")).egress_ip);
+      } catch {
+        showLogin();
+      }
     }
   }
 
@@ -1351,8 +1393,7 @@
         body: JSON.stringify({ password: passwordInput.value }),
       });
       passwordInput.value = "";
-      const data = await api("/api/ip");
-      enterApp(data.egress_ip);
+      enterApp();
     } catch (err) {
       showError(err.status === 429
         ? "Too many attempts. Wait a few minutes."
@@ -2068,4 +2109,12 @@
   })();
 
   checkSession();
+
+  // Installable app + instant repeat loads. The worker only caches content-hashed files
+  // and never pages or API calls, so it cannot pin anyone to an old version.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    });
+  }
 })();
