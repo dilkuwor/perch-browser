@@ -266,7 +266,7 @@ The speedometer icon in the title bar opens a panel with live connection stats: 
 ### Phones and tablets
 
 - One finger drags to scroll, a still tap clicks, and a long press right-clicks.
-- Tapping a text field raises the on-screen keyboard automatically. The keyboard button in the toolbar raises it manually — useful for fields inside cross-origin iframes, where the server cannot tell what has focus.
+- Tapping a text field raises the on-screen keyboard automatically, and tapping elsewhere puts it away. (Phones only open the keyboard *during* a tap, so Perch asks the home server what is under your finger as the touch begins and has the answer by the time you lift it.) While the keyboard is open the page shrinks to the space above it and the field you are typing into is kept in view. The keyboard button in the toolbar raises it manually — useful for fields inside cross-origin iframes, where the server cannot tell what is there, and on iPhone for the rare page that moves focus into a field by script after your tap.
 - The remote viewport is sized to your screen (down to 360 px wide), so responsive sites render their mobile layout instead of a shrunken desktop page.
 - On a phone the title bar keeps your tabs, and the tools (latency, ad blocker, sound, settings, sign out …) sit behind the **⋯** button.
 

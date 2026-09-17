@@ -95,6 +95,7 @@
     tabsUnsupported: false,
     latencyTimer: null,
     adblock: false,
+    hitSeq: 0,
     wheel: null,
     wheelFrame: 0,
     remoteFs: false,
@@ -1593,6 +1594,27 @@
     // transition makes Chromium drop back out of fullscreen.
   }
 
+  // ——— on-screen keyboard ———
+
+  // A phone's keyboard does not shrink the page, it covers the bottom of it — often the
+  // very field being typed into. Shrink the app to the space above the keyboard; the
+  // remote view resizes with it (ResizeObserver -> sendResize) and the server scrolls the
+  // focused field back into view. Touch devices only, and not while pinch-zoomed, where
+  // the visual viewport shrinks for a different reason.
+  if (window.visualViewport && window.matchMedia("(pointer: coarse)").matches) {
+    const vv = window.visualViewport;
+    const syncKeyboardInset = () => {
+      if (vv.scale > 1.01) return;
+      const inset = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+      const open = inset > 100;
+      document.documentElement.style.setProperty("--kb-inset", open ? `${inset}px` : "0px");
+      // iOS scrolls the page to reveal the (invisible) focused textarea; undo that.
+      if (open && (window.scrollY || vv.offsetTop)) window.scrollTo(0, 0);
+    };
+    vv.addEventListener("resize", syncKeyboardInset);
+    vv.addEventListener("scroll", syncKeyboardInset);
+  }
+
   // ——— visibility ———
 
   // When Perch is not on screen (another browser tab, phone app in the background) the
@@ -1730,8 +1752,12 @@
         flashStatus(String(msg.text).slice(0, 160), 5000);
         return;
       }
+      if (msg.type === "hit") {
+        if (state.touch && state.touch.seq === msg.seq) state.touch.editable = msg.editable;
+        return;
+      }
       if (msg.type === "focus") {
-        if (msg.editable) focusKbd();
+        if (msg.editable && document.activeElement !== kbd) focusKbd();
       }
     });
   }
@@ -1912,7 +1938,14 @@
       return;
     }
     const t = e.changedTouches[0];
+    // Find out now what is under the finger, so that by touchend we know whether to
+    // raise the keyboard (see endTouch).
+    state.hitSeq += 1;
+    const hp = localPoint(t.clientX, t.clientY);
+    sendWs({ type: "hittest", seq: state.hitSeq, x: hp.x, y: hp.y, vw: hp.vw, vh: hp.vh });
     state.touch = {
+      seq: state.hitSeq,
+      editable: undefined, // true | false | null (unknowable) once the server answers
       id: t.identifier,
       x: t.clientX,
       y: t.clientY,
@@ -1970,7 +2003,13 @@
     state.touch = null;
     if (cancelled || cur.moved || cur.done) return;
     sendTap({ clientX: cur.x, clientY: cur.y }, 0);
-    // Ask the server whether the tap landed in a text field, to raise the keyboard.
+    // Phones — iOS strictly — open the keyboard only if a field is focused *inside* the
+    // tap's own event handler; focusing later, when a server reply arrives, is ignored.
+    // The hit-test sent at touchstart has normally answered by now, so act on it here.
+    if (cur.editable === true) focusKbd();
+    else if (cur.editable === false && document.activeElement === kbd) blurKbd();
+    // Fallback and confirmation: a slow link (no answer yet), or a tap on something that
+    // moves focus into a field by script. Works where late focus is allowed (Android).
     sendWs({ type: "probe" });
   }
 

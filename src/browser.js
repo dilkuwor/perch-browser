@@ -47,6 +47,45 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ].filter(Boolean);
 
+// Runs in the remote page: is the thing at (x, y) something you type into?
+// true / false, or null when it cannot be known (inside a cross-origin iframe).
+function editableAt(x, y) {
+  const TEXT_INPUT = /^(?:text|search|email|url|tel|password|number|date|datetime-local|month|time|week|)$/i;
+  let doc = document;
+  let el = null;
+  let ox = 0;
+  let oy = 0;
+  for (let depth = 0; depth < 6; depth += 1) {
+    el = doc.elementFromPoint(x - ox, y - oy);
+    if (!el) return false;
+    while (el.shadowRoot) {
+      const inner = el.shadowRoot.elementFromPoint(x - ox, y - oy);
+      if (!inner || inner === el) break;
+      el = inner;
+    }
+    if (el.tagName !== "IFRAME" && el.tagName !== "FRAME") break;
+    let inner = null;
+    try {
+      inner = el.contentDocument;
+    } catch {
+      // cross-origin
+    }
+    if (!inner) return null;
+    const r = el.getBoundingClientRect();
+    ox += r.left + el.clientLeft;
+    oy += r.top + el.clientTop;
+    doc = inner;
+  }
+  const label = el.closest("label");
+  const target =
+    el.closest('input,textarea,[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"],[role="textbox"],[role="searchbox"],[role="combobox"]') ||
+    (label && label.control);
+  if (!target) return false;
+  if (target.disabled || target.readOnly) return false;
+  if (target.tagName === "INPUT") return TEXT_INPUT.test(target.getAttribute("type") || "");
+  return true;
+}
+
 // Runs in the remote page. Reports fullscreen changes through a CDP binding, which it
 // removes from `window` straight away so pages cannot see it. Re-runnable: a fresh CDP
 // session (tab switch) brings a fresh binding, and the old listener is swapped out.
@@ -1350,6 +1389,16 @@ class HomeBrowser {
     } catch {
       // ignore
     }
+    // A shrinking view (a phone's keyboard opening) must not leave the field being typed
+    // into below the fold. "nearest" does nothing when it is already visible.
+    this.page
+      .evaluate(() => {
+        const el = document.activeElement;
+        if (el && (el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+          el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+      })
+      .catch(() => {});
     await this._restartScreencast();
     this._snapshot();
   }
@@ -1387,8 +1436,15 @@ class HomeBrowser {
       return this.resize(msg.width, msg.height);
     }
     if (!this.ready) return Promise.resolve();
+    if (msg.type === "hittest") {
+      return this._hitTest(ws, msg);
+    }
     if (msg.type === "probe") {
-      return this._probeFocus(ws);
+      // Queued behind the tap it follows. Answered straight away it would often look at
+      // the page before the click had been delivered, and report "no text field".
+      this._pendingExtras.push({ type: "probe", ws });
+      this._drainInput();
+      return Promise.resolve();
     }
     if (msg.type === "snapshot") {
       return this._snapshot(ws);
@@ -1467,6 +1523,10 @@ class HomeBrowser {
         break;
       case "paste":
         await this._paste(msg);
+        break;
+      case "probe":
+        await delay(60); // let the page's own focus handlers run
+        await this._probeFocus(msg.ws);
         break;
       default:
         break;
@@ -1556,6 +1616,24 @@ class HomeBrowser {
     const text = String(msg.text ?? "");
     if (!text) return;
     await this.inputCdp.send("Input.insertText", { text: text.slice(0, 20000) });
+  }
+
+  // Asked at touchstart, so the answer is usually back before the finger lifts: phones
+  // (iOS strictly) only open the keyboard when the page focuses a field *during* the tap.
+  async _hitTest(ws, msg) {
+    if (!this.page || !ws) return;
+    const { x, y } = this.scalePoint(msg);
+    let editable = null;
+    try {
+      editable = await withTimeout(this.page.evaluate(editableAt, x, y), 400, null);
+    } catch {
+      editable = null;
+    }
+    try {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: "hit", seq: msg.seq, editable }));
+    } catch {
+      // ignore
+    }
   }
 
   async _probeFocus(ws) {

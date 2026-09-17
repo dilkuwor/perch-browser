@@ -1937,6 +1937,8 @@ label.set-row {
      home indicator; keep the controls out from under them. */
   .app-screen {
     height: 100dvh;
+    /* --kb-inset: height of the on-screen keyboard while it is open (set from app.js). */
+    height: calc(100dvh - var(--kb-inset, 0px));
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
       env(safe-area-inset-left);
   }
