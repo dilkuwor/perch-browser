@@ -12,7 +12,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 
 ![Perch login screen](docs/screenshot-login.png)
 
-**The browser** — real tabs, an address bar with speed dials, and the home server's live egress IP in the status bar.
+**The browser** — real tabs, the new-tab page with search and shortcuts over the bundled wallpaper, the tools in the title bar (latency, ad blocker, sound, focus, settings), and the home server's live egress IP in the status bar.
 
 ![Perch browser UI](docs/screenshot-app.png)
 

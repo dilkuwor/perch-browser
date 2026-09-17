@@ -755,8 +755,9 @@ body.is-focus .statusbar {
   gap: 4px;
 }
 
-/* Phones only (see the small-screen block): opens the tools tray. */
-.more-btn {
+/* Phones only (see the small-screen block): opens the tools tray. Needs to out-rank
+   `.icon-btn { display: grid }`, which comes later in this file. */
+.icon-btn.more-btn {
   display: none;
   flex-shrink: 0;
 }
@@ -1940,7 +1941,7 @@ label.set-row {
     flex: 1 1 auto;
   }
 
-  .more-btn {
+  .icon-btn.more-btn {
     display: grid;
     width: 38px;
     height: 38px;
