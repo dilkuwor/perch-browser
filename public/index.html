@@ -175,8 +175,12 @@
         <div class="titlebar-actions">
           <div class="latency-wrap">
             <button type="button" class="icon-btn latency-btn" id="btn-latency" title="Latency" aria-label="Show latency">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8">
-                <path d="M3 17l5-6 4 4 4-7 5 5" />
+              <svg class="latency-gauge" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <path d="M4.3 17.6A8.5 8.5 0 1 1 19.7 17.6" />
+                <g class="lat-needle">
+                  <path d="M12 14V8.2" />
+                  <circle cx="12" cy="14" r="1.5" fill="currentColor" stroke="none" />
+                </g>
               </svg>
               <span class="latency-dot" id="latency-dot" aria-hidden="true"></span>
             </button>

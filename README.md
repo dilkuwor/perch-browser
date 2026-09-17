@@ -260,7 +260,7 @@ The gear icon in the title bar opens the settings page (**Esc** or **Done** clos
 
 ### Latency
 
-The chart icon next to **Focus** opens a panel with live connection stats: round-trip time to the home server, frames per second, bandwidth, and the remote viewport size. The dot on the icon is green under ~80 ms, amber under ~200 ms, and red above — handy for telling an unresponsive site apart from a slow link.
+The speedometer icon in the title bar opens a panel with live connection stats: round-trip time to the home server, frames per second, bandwidth, and the remote viewport size. Its needle follows the round trip: right and green under ~80 ms, upright and amber under ~200 ms, left and red above — handy for telling an unresponsive site apart from a slow link.
 
 ### Phones and tablets
 

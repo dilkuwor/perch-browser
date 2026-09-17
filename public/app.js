@@ -722,8 +722,10 @@
         ? "off"
         : `${audio.format === "opus" ? "Opus" : "PCM"}${pkts ? ` · ${pkts} pkt/s` : ""}`;
     latencyDot.className = "latency-dot";
+    if (state.rtt == null) delete btnLatency.dataset.level;
     if (state.rtt != null) {
       latencyDot.classList.add(state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor");
+      btnLatency.dataset.level = state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor";
     }
     btnLatency.title = state.rtt == null ? "Latency" : `Latency: ${Math.round(state.rtt)} ms`;
   }
@@ -770,7 +772,7 @@
     toggleLatency(false);
   });
 
-  // Keep a cheap background ping so the dot on the icon stays meaningful.
+  // Keep a cheap background ping so the gauge on the icon stays meaningful.
   setInterval(() => {
     if (!latencyPanel.hidden || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
     sendPing();
@@ -1544,6 +1546,8 @@
       state.reconnectDelay = 500;
       sendResize(true);
       sendAudioPref();
+      // Measure at once so the gauge needle settles without waiting for the 5 s tick.
+      sendPing();
     });
     ws.addEventListener("close", (ev) => {
       if (gen !== state.wsGen) return;
@@ -1613,6 +1617,7 @@
         if (typeof msg.t === "number") {
           state.rtt = performance.now() - msg.t;
           latencyDot.className = "latency-dot " + (state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor");
+          btnLatency.dataset.level = state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor";
           btnLatency.title = `Latency: ${Math.round(state.rtt)} ms`;
         }
         return;
