@@ -18,6 +18,8 @@ services:
       JPEG_QUALITY: ${JPEG_QUALITY:-60}
       AUDIO: ${AUDIO:-1}
       AUDIO_BITRATE: ${AUDIO_BITRATE:-96}
+      ADBLOCK: ${ADBLOCK:-0}
+      ADBLOCK_EXTRA_LISTS: ${ADBLOCK_EXTRA_LISTS:-}
     volumes:
       - chrome-profile:/data/chrome
     shm_size: "1gb"

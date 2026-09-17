@@ -21,6 +21,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 - **Real Chromium, streamed.** Pages render on the home server and stream as binary JPEG frames over WebSocket; input is forwarded with the Chrome DevTools Protocol.
 - **Egress from home.** Every site sees your home network's public IP, not the device in your hand.
 - **Sound.** What Chromium plays at home — video, music, calls — streams to the device as Opus (or raw PCM on browsers without WebCodecs), with a mute button in the title bar.
+- **Ad blocker.** One click on the shield in the title bar blocks ads, trackers, video ads, pop-ups, and cookie banners with the EasyList and uBlock Origin filter lists — and because ads are never rendered, there is less to stream.
 - **Tabs.** A real tab strip to open, switch, and close tabs. Popups and SSO windows take over the view and hand it back when closed.
 - **Non-blocking navigation.** Keep full mouse and keyboard control while a page loads, with no stale frames after a URL change.
 - **Sign-in friendly.** Real key events, hover-before-click, and no automation banner, so Google's "are you human?" checks and corporate SSO behave like a local browser.
@@ -173,6 +174,9 @@ All settings are read from environment variables (via `.env` when running native
 | `AUDIO_SOURCE`      | `perch.monitor`            | PulseAudio source ffmpeg records. The Docker image creates the `perch` null sink; natively, create it with `pactl` (see above) or use `@DEFAULT_MONITOR@`. |
 | `AUDIO_BITRATE`     | `96`                       | Opus bitrate in kbit/s (24–256). Raw PCM, used by browsers without WebCodecs Opus, is a fixed 24 kHz stereo. |
 | `FFMPEG_PATH`       | _(auto-detect)_            | Path to the ffmpeg binary, if it is not on `PATH`.                                                           |
+| `ADBLOCK`           | `0`                        | Initial state of the ad blocker. Only a default: once the shield button has been used, its state is remembered (inside `CHROME_USER_DATA`). |
+| `ADBLOCK_EXTRA_LISTS` | _(none)_                 | Comma-separated URLs of extra filter lists (Adblock Plus / uBlock syntax), e.g. a regional EasyList.          |
+| `ADBLOCK_UPDATE_HOURS` | `24`                    | How often the filter lists are re-downloaded.                                                                |
 
 ## Verify it works
 
@@ -209,6 +213,20 @@ The title bar is a real tab strip. **+** opens a new tab (showing the start page
 ### Sound
 
 Whatever the remote Chromium plays streams to your device. Browsers only allow sound after you interact with the page, so the first click or tap in the viewport switches it on; the speaker button in the title bar mutes and unmutes, and the choice is remembered on that device. The **Latency** panel shows which encoding is in use: **Opus** (about 100 kbit/s, on Chrome, Edge, Firefox, and recent Safari) or **PCM** (about 770 kbit/s) as a fallback. When nothing is playing, the stream costs almost nothing.
+
+### Ad blocker
+
+The shield button next to **Latency** switches ad blocking on and off for the whole remote browser; the current tab reloads so the change shows at once, and the choice survives restarts. The badge counts what was blocked on the current page. The first time it is enabled the filter lists are downloaded (the shield pulses for a few seconds); after that they are cached on disk and refreshed daily in the background.
+
+It works in layers, because no single technique catches everything:
+
+- **Network filtering.** Requests to ad and tracking servers are dropped before they leave the home server, using EasyList, EasyPrivacy, Peter Lowe's list, and uBlock Origin's filters (ads, privacy, badware, annoyances, cookie notices). Scripts that pages refuse to run without — Google's video-ad SDK, analytics — are swapped for inert stand-ins, so video players such as the Daily Mail's start the video instead of stalling.
+- **Scriptlets.** Sites that serve ads from their own servers (YouTube, Facebook) cannot be filtered by address. For those, small scripts are spliced into the page ahead of the site's own code to strip ad payloads out of its data. Perch adds them to the HTML as it passes through and whitelists exactly that script in the page's Content-Security-Policy, so they work on strict sites without weakening the policy for anything else.
+- **Cosmetic filtering.** Leftover ad slots, "sponsored" boxes, and placeholders are hidden, including procedural rules (`:has-text()`, `:upward()` …) and rules that only apply once matching elements appear as you scroll.
+- **Pop-ups.** Windows opened by a page towards an ad server are closed before they take over the view.
+- **YouTube fallback.** If a video ad still slips through, it is muted and skipped to its end within a fraction of a second.
+
+To add your own rules, put them in `perch-adblock/custom-filters.txt` inside the Chrome profile directory (same syntax as uBlock Origin's "My filters") and restart. YouTube and Facebook actively fight ad blockers, so an ad can occasionally appear there until the lists catch up — usually within a day.
 
 ### Latency
 

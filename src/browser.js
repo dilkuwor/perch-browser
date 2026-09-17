@@ -19,6 +19,7 @@ const META_POLL_MS = 1_000;
 const INPUT_QUEUE_MAX = 128;
 
 const { AudioStreamer, AUDIO_FORMATS } = require("./audio");
+const { AdBlocker } = require("./adblock");
 
 const FRAME_TYPE = 1;
 const FRAME_HEADER_BYTES = 9;
@@ -41,6 +42,13 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ].filter(Boolean);
+
+function userDataDir() {
+  return (
+    (process.env.CHROME_USER_DATA && process.env.CHROME_USER_DATA.trim()) ||
+    path.join(os.tmpdir(), "home-browser-chrome")
+  );
+}
 
 function findChrome() {
   const fromEnv = process.env.CHROME_PATH && process.env.CHROME_PATH.trim();
@@ -363,6 +371,13 @@ class HomeBrowser {
     this._lastActive = null;
     this.audioEnabled = String(process.env.AUDIO || "1") !== "0";
     this._audio = {};
+    this.adblock = new AdBlocker({
+      // Lives inside the Chrome profile so it shares its volume/persistence.
+      dataDir: path.join(userDataDir(), "perch-adblock"),
+      getActivePage: () => this.page,
+      getPages: () => this._openPages(),
+      onChange: () => this._broadcastAdblock(),
+    });
   }
 
   get ready() {
@@ -388,9 +403,6 @@ class HomeBrowser {
     try {
       await this._killBrowser();
       const executablePath = findChrome();
-      const userDataDir =
-        (process.env.CHROME_USER_DATA && process.env.CHROME_USER_DATA.trim()) ||
-        path.join(os.tmpdir(), "home-browser-chrome");
       // Headed (Xvfb) mode: make the real window as large as the biggest viewport we
       // allow so the emulated viewport always fits inside it.
       const winW = this.headed ? MAX_VIEW_W : this.viewport.width;
@@ -426,7 +438,7 @@ class HomeBrowser {
         headless: this.headed ? false : true,
         dumpio: false,
         protocolTimeout: 30_000,
-        userDataDir,
+        userDataDir: userDataDir(),
         // --enable-automation is the flag that makes navigator.webdriver true and
         // shows the "controlled by automated software" bar; hidden scrollbars are a
         // headless fingerprint and hide where you are on the page.
@@ -468,6 +480,9 @@ class HomeBrowser {
       this._listenTargets();
       const pages = await this.browser.pages();
       const page = pages[0] || (await this.browser.newPage());
+      this.adblock.reset();
+      // Filter lists may need downloading on first use; never hold the launch for that.
+      this.adblock.start().catch(() => {});
       await this._bindPage(page);
       await this._sendMeta(true);
       if (this.clients.size > 0) {
@@ -544,6 +559,9 @@ class HomeBrowser {
         return;
       }
       if (!page || page === this.page || page.isClosed()) return;
+      // Ad pop-ups/pop-unders are closed here, before they can steal the view.
+      if (await this.adblock.screenPopup(target, page).catch(() => false)) return;
+      if (page.isClosed()) return;
       console.log("[home-browser] new window/tab; switching view");
       await this._adoptPage(page).catch((err) => {
         console.error(`[home-browser] adopt page failed: ${err.message}`);
@@ -743,7 +761,9 @@ class HomeBrowser {
     });
 
     await page.bringToFront().catch(() => {});
+    await this.adblock.attach(page);
     await this._attachSessions(page);
+    this._broadcastAdblock();
   }
 
   async _attachSessions(page) {
@@ -975,6 +995,7 @@ class HomeBrowser {
     this.clients.add(ws);
     try {
       ws.send(JSON.stringify({ type: "meta", ...this.lastMeta }));
+      ws.send(JSON.stringify({ type: "adblock", ...this.adblock.state(this.page) }));
     } catch {
       // ignore
     }
@@ -991,6 +1012,23 @@ class HomeBrowser {
     this.clients.delete(ws);
     if (this.clients.size === 0) this._stopScreencast().catch(() => {});
     this._syncAudio();
+  }
+
+  // ——— ad blocker ———
+
+  _broadcastAdblock() {
+    this.broadcast({ type: "adblock", ...this.adblock.state(this.page) });
+  }
+
+  // The switch is global (one Chromium, shared by every client). The active tab is
+  // reloaded so the change is visible at once; other tabs pick it up as they navigate.
+  async setAdblock(enabled) {
+    const wasOn = this.adblock.state().status === "on";
+    await this.adblock.setEnabled(enabled);
+    this._broadcastAdblock();
+    const isOn = this.adblock.state().status === "on";
+    if (isOn === wasOn || !this.ready) return;
+    if (/^https?:/i.test(this.lastMeta.url || "")) await this.action("reload").catch(() => {});
   }
 
   // ——— audio ———
@@ -1163,6 +1201,9 @@ class HomeBrowser {
     if (msg.type === "audio") {
       this._setClientAudio(ws, msg.format);
       return Promise.resolve();
+    }
+    if (msg.type === "adblock") {
+      return this.setAdblock(msg.enabled === true);
     }
     if (msg.type === "resize") {
       if (!this.ready) return Promise.resolve();
@@ -1396,6 +1437,7 @@ class HomeBrowser {
     }
     this.clients.clear();
     for (const streamer of Object.values(this._audio)) streamer.stop();
+    this.adblock.stop();
     await this._stopScreencast();
     await this._killBrowser();
   }

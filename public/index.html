@@ -177,6 +177,13 @@
               <div class="latency-row"><span>Sound</span><strong id="lat-audio">…</strong></div>
             </div>
           </div>
+          <button type="button" class="icon-btn adblock-btn" id="btn-adblock" title="Ad blocker: off" aria-label="Toggle ad blocker" aria-pressed="false">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+              <path d="M12 3.5l7 2.6v5.4c0 4.3-2.9 7.6-7 9-4.1-1.4-7-4.7-7-9V6.1l7-2.6z" />
+              <path id="adblock-check" d="M9 12l2.2 2.2L15.2 10" stroke-linecap="round" hidden />
+            </svg>
+            <span class="adblock-count" id="adblock-count" aria-hidden="true" hidden></span>
+          </button>
           <button type="button" class="icon-btn" id="btn-audio" title="Sound" aria-label="Toggle sound" aria-pressed="false">
             <svg id="audio-on-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
               <path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z" />

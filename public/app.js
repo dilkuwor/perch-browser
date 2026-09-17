@@ -29,6 +29,9 @@
   const ipChip = document.getElementById("ip-chip");
   const btnFocus = document.getElementById("btn-focus");
   const btnAudio = document.getElementById("btn-audio");
+  const btnAdblock = document.getElementById("btn-adblock");
+  const adblockCheck = document.getElementById("adblock-check");
+  const adblockCount = document.getElementById("adblock-count");
   const audioOnIcon = document.getElementById("audio-on-icon");
   const audioOffIcon = document.getElementById("audio-off-icon");
   const latAudio = document.getElementById("lat-audio");
@@ -91,6 +94,7 @@
     activeTab: null,
     tabsUnsupported: false,
     latencyTimer: null,
+    adblock: false,
     rtt: null,
     statFrames: 0,
     statBytes: 0,
@@ -205,6 +209,37 @@
   }
 
   btnNewTab.addEventListener("click", () => tabAction("new"));
+
+  // ——— ad blocker ———
+
+  // The switch lives on the server (one Chromium for every client), so the button only
+  // ever reflects what the server last reported.
+  function renderAdblock(msg) {
+    const on = msg.status === "on";
+    const loading = msg.status === "loading";
+    state.adblock = Boolean(msg.enabled);
+    btnAdblock.classList.toggle("is-on", on);
+    btnAdblock.classList.toggle("is-loading", loading);
+    btnAdblock.classList.toggle("is-error", msg.status === "error");
+    btnAdblock.setAttribute("aria-pressed", msg.enabled ? "true" : "false");
+    adblockCheck.hidden = !on;
+    const blocked = Number(msg.blocked) || 0;
+    adblockCount.hidden = !on || blocked === 0;
+    adblockCount.textContent = blocked > 99 ? "99+" : String(blocked);
+    btnAdblock.title = on
+      ? `Ad blocker: on — ${blocked} blocked on this page, ${Number(msg.total) || 0} this session`
+      : loading
+        ? "Ad blocker: downloading filter lists…"
+        : msg.status === "error"
+          ? `Ad blocker unavailable: ${msg.error || "could not load filter lists"} (click to retry)`
+          : "Ad blocker: off";
+  }
+
+  btnAdblock.addEventListener("click", () => {
+    if (btnAdblock.classList.contains("is-loading")) return;
+    const retry = btnAdblock.classList.contains("is-error");
+    sendWs({ type: "adblock", enabled: retry ? true : !state.adblock });
+  });
 
   // ——— latency ———
 
@@ -1103,6 +1138,10 @@
       }
       if (msg.type === "tabs") {
         renderTabs(msg.tabs, msg.active);
+        return;
+      }
+      if (msg.type === "adblock") {
+        renderAdblock(msg);
         return;
       }
       if (msg.type === "pong") {

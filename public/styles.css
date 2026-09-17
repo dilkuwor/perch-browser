@@ -540,6 +540,46 @@ body.is-focus .statusbar {
   background: transparent;
 }
 
+.adblock-btn {
+  position: relative;
+}
+
+.adblock-btn.is-loading svg {
+  animation: adblock-pulse 1s ease-in-out infinite;
+}
+
+.adblock-btn.is-error {
+  color: var(--danger);
+}
+
+.adblock-btn path[hidden] {
+  display: none;
+}
+
+.adblock-count {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  min-width: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #0b0e14;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.adblock-count[hidden] {
+  display: none;
+}
+
+@keyframes adblock-pulse {
+  50% { opacity: 0.35; }
+}
+
 .latency-dot.good { background: var(--ok); }
 .latency-dot.fair { background: #febc2e; }
 .latency-dot.poor { background: var(--danger); }
