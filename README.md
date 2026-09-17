@@ -187,7 +187,7 @@ All settings are read from environment variables (via `.env` when running native
 | `CHROME_NO_SANDBOX` | `0`                        | Set to `1` if Chromium fails with a sandbox error (common on some VPS / LXC hosts). Prefer a real user-namespace sandbox where possible. |
 | `CHROME_HEADLESS`   | `1`                        | `0` runs a real (headed) Chromium under Xvfb — the Docker default, and the mode you want for Google, CAPTCHAs, and corporate sign-in, since headless Chromium is easier to detect and gets challenged more often. |
 | `CHROME_USER_DATA`  | _(temporary)_              | Directory for the Chrome profile. Set it to keep cookies and site trust between restarts; otherwise every site treats each restart as a brand-new visitor. |
-| `JPEG_QUALITY`      | `60`                       | Frame quality, 20–95. Lower trades sharpness for bandwidth; try `45` on a slow mobile link.                  |
+| `JPEG_QUALITY`      | `60`                       | Frame quality, 20–100. Lower trades sharpness for bandwidth; try `45` on a slow mobile link.                  |
 | `AUDIO`             | `1`                        | `0` disables sound capture entirely (no PulseAudio or ffmpeg needed).                                        |
 | `AUDIO_SOURCE`      | `perch.monitor`            | PulseAudio source ffmpeg records. The Docker image creates the `perch` null sink; natively, create it with `pactl` (see above) or use `@DEFAULT_MONITOR@`. |
 | `AUDIO_BITRATE`     | `96`                       | Opus bitrate in kbit/s (24–256). Raw PCM, used by browsers without WebCodecs Opus, is a fixed 24 kHz stereo. |

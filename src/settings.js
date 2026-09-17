@@ -43,7 +43,7 @@ function defaults(env = process.env) {
     toolbar: Object.fromEntries(TOOLBAR_ITEMS.map((k) => [k, true])),
     newTab: { background: "default", dim: 35, search: true, shortcuts: true },
     browsing: { homeUrl: "", searchEngine: "google" },
-    stream: { quality: clampInt(env.JPEG_QUALITY, 20, 95, 60) },
+    stream: { quality: clampInt(env.JPEG_QUALITY, 20, 100, 60) },
     backgroundVersion: 0,
   };
 }
@@ -74,7 +74,7 @@ function sanitize(input, base) {
   if (Object.hasOwn(SEARCH_ENGINES, browsing.searchEngine)) out.browsing.searchEngine = browsing.searchEngine;
 
   const stream = src.stream && typeof src.stream === "object" ? src.stream : {};
-  out.stream.quality = clampInt(stream.quality, 20, 95, base.stream.quality);
+  out.stream.quality = clampInt(stream.quality, 20, 100, base.stream.quality);
 
   out.backgroundVersion = clampInt(src.backgroundVersion, 0, Number.MAX_SAFE_INTEGER, base.backgroundVersion);
   return out;

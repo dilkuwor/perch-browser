@@ -1304,14 +1304,26 @@ body.is-focus .statusbar {
   user-select: none;
 }
 
+/* The URL on the left gives way (with an ellipsis); the IP chip on the right never
+   shrinks or wraps, however long the address is. */
 .status-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 0;
   min-width: 0;
 }
 
+.status-right {
+  flex-shrink: 0;
+}
+
+.ws-dot {
+  flex-shrink: 0;
+}
+
 #status-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1340,6 +1352,7 @@ body.is-focus .statusbar {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 /* ——— settings page ——— */

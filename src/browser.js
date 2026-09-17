@@ -24,7 +24,7 @@ const { AdBlocker } = require("./adblock");
 const FRAME_TYPE = 1;
 const FRAME_HEADER_BYTES = 9;
 
-const JPEG_QUALITY = clamp(Number(process.env.JPEG_QUALITY) || 60, 20, 95);
+const JPEG_QUALITY = clamp(Number(process.env.JPEG_QUALITY) || 60, 20, 100);
 const META_AS_CTRL = process.platform !== "darwin";
 
 const CHROME_CANDIDATES = [
@@ -1024,7 +1024,7 @@ class HomeBrowser {
   applySettings({ homeUrl, searchUrl, quality }) {
     if (homeUrl) this.homeUrl = homeUrl;
     if (searchUrl) this.searchUrl = searchUrl;
-    const q = clamp(Number(quality) || this.jpegQuality, 20, 95);
+    const q = clamp(Number(quality) || this.jpegQuality, 20, 100);
     if (q !== this.jpegQuality) {
       this.jpegQuality = q;
       if (this._screencastOn) this._restartScreencast().catch(() => {});

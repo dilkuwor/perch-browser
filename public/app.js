@@ -403,8 +403,15 @@
       // An older server answers 200 but silently drops sections it has never heard of.
       const dropped = Object.keys(patch).filter((section) => !(reply.settings && section in reply.settings));
       for (const section of dropped) reply.settings[section] = { ...state.settings[section], ...patch[section] };
+      // …or clamps a number to a limit it had before an update (e.g. quality 100 -> 95).
+      const clamped = Object.entries(patch).some(([section, values]) =>
+        Object.entries(values).some(
+          ([key, value]) => typeof value === "number" && reply.settings[section] && reply.settings[section][key] !== value
+        )
+      );
       applySettings(reply);
       if (dropped.length) showSaved(STALE_SERVER.replace("to use settings", "to keep this setting"), true);
+      else if (clamped) showSaved("The server changed that value — if Perch was just updated, restart the server", true);
       else showSaved("Saved");
     } catch (err) {
       saveError("Could not save", err);

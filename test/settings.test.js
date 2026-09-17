@@ -92,6 +92,13 @@ describe("update", () => {
     assert.equal({}.polluted, undefined);
   });
 
+  it("allows picture quality up to 100 and no further", () => {
+    const settings = new Settings({ dataDir: dir, env: {} });
+    assert.equal(settings.update({ stream: { quality: 100 } }).stream.quality, 100);
+    assert.equal(settings.update({ stream: { quality: 150 } }).stream.quality, 100);
+    assert.equal(new Settings({ dataDir: dir, env: { JPEG_QUALITY: "100" } }).get().stream.quality, 100);
+  });
+
   it("normalises the home page and lets it be cleared", () => {
     const settings = new Settings({ dataDir: dir, env: {} });
     assert.equal(settings.update({ browsing: { homeUrl: "example.com" } }).browsing.homeUrl, "https://example.com/");
