@@ -95,6 +95,10 @@
     tabsUnsupported: false,
     latencyTimer: null,
     adblock: false,
+    settings: null,
+    settingsOpen: false,
+    hasCustomBg: false,
+    searchUrl: "https://www.google.com/search?q=%s",
     rtt: null,
     statFrames: 0,
     statBytes: 0,
@@ -210,6 +214,371 @@
 
   btnNewTab.addEventListener("click", () => tabAction("new"));
 
+  // ——— settings ———
+
+  // Settings live on the server and are pushed to every device. A copy in localStorage
+  // only exists so the top bar does not flash hidden tools in before the first reply.
+  const SETTINGS_CACHE_KEY = "perch.settings";
+  const BG_MAX_W = 2560;
+  const BG_MAX_H = 1600;
+  const btnSettings = document.getElementById("btn-settings");
+  const settingsPage = document.getElementById("settings-page");
+  const settingsBody = document.getElementById("settings-body");
+  const settingsSaved = document.getElementById("settings-saved");
+  const startPage = document.getElementById("start-page");
+  const bgFile = document.getElementById("bg-file");
+  const bgUpload = document.getElementById("bg-upload");
+  const bgRemove = document.getElementById("bg-remove");
+  const bgError = document.getElementById("bg-error");
+  const bgThumbCustom = document.getElementById("bg-thumb-custom");
+  const setAdblock = document.getElementById("set-adblock");
+  const searchEngineSelect = document.getElementById("set-search-engine");
+  const homeUrlInput = document.getElementById("set-home-url");
+  const TOOL_ELEMENTS = {
+    latency: document.querySelector(".latency-wrap"),
+    adblock: btnAdblock,
+    audio: btnAudio,
+    focus: document.getElementById("btn-focus"),
+    maximize: document.getElementById("btn-maximize"),
+    home: document.getElementById("btn-home"),
+    keyboard: document.getElementById("btn-kbd"),
+    statusbar: document.getElementById("statusbar"),
+  };
+  let savedTimer = null;
+  let saveTimer = null;
+  let pendingPatch = {};
+
+  function getPath(obj, path) {
+    return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+  }
+
+  function customBgUrl(s) {
+    return `/api/background?v=${s.backgroundVersion}`;
+  }
+
+  // "system" follows the device, so the same setting can resolve differently on a phone
+  // and a laptop. The resolved value goes on <html>; the choice is cached for the inline
+  // script in index.html, which themes the page before first paint.
+  const THEME_KEY = "perch.theme";
+  const THEME_COLORS = { dark: "#07080b", light: "#e6eaf2" };
+  const prefersLight = window.matchMedia("(prefers-color-scheme: light)");
+
+  function applyTheme(theme) {
+    const choice = theme === "light" || theme === "system" ? theme : "dark";
+    const resolved = choice === "system" ? (prefersLight.matches ? "light" : "dark") : choice;
+    document.documentElement.dataset.theme = resolved;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = THEME_COLORS[resolved];
+    for (const btn of settingsPage.querySelectorAll("[data-theme-choice]")) {
+      btn.setAttribute("aria-checked", String(btn.dataset.themeChoice === choice));
+    }
+    try {
+      localStorage.setItem(THEME_KEY, choice);
+    } catch {
+      // ignore
+    }
+  }
+
+  prefersLight.addEventListener("change", () => {
+    if (state.settings && state.settings.appearance.theme === "system") applyTheme("system");
+  });
+
+  function applySettings(payload) {
+    if (!payload || !payload.settings) return;
+    const s = payload.settings;
+    // A server from before themes existed sends no appearance block. The theme then
+    // lives on this device only, rather than snapping back to dark.
+    if (!s.appearance) {
+      let local = null;
+      try {
+        local = localStorage.getItem(THEME_KEY);
+      } catch {
+        // ignore
+      }
+      s.appearance = { theme: local || "dark" };
+    }
+    applyTheme(s.appearance.theme);
+    state.settings = s;
+    if (payload.searchUrl) state.searchUrl = payload.searchUrl;
+    if (typeof payload.hasCustomBackground === "boolean") state.hasCustomBg = payload.hasCustomBackground;
+    try {
+      localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify({ settings: s, searchUrl: state.searchUrl }));
+    } catch {
+      // private mode / storage full: the cache is only a nicety
+    }
+
+    for (const [key, el] of Object.entries(TOOL_ELEMENTS)) {
+      if (el) el.classList.toggle("is-user-hidden", s.toolbar[key] === false);
+    }
+    if (s.toolbar.latency === false) toggleLatency(false);
+
+    const bg = s.newTab.background;
+    const url = bg === "custom" ? customBgUrl(s) : bg === "default" ? "img/newtab-default.webp" : "";
+    startPage.classList.toggle("has-bg", Boolean(url));
+    startPage.style.setProperty("--start-bg", url ? `url("${url}")` : "none");
+    startPage.style.setProperty("--start-dim", String(s.newTab.dim / 100));
+    startPage.classList.toggle("no-search", !s.newTab.search);
+    startPage.classList.toggle("no-shortcuts", !s.newTab.shortcuts);
+
+    renderSettingsForm(payload);
+  }
+
+  function renderSettingsForm(payload) {
+    const s = state.settings;
+    if (payload.searchEngines && searchEngineSelect.options.length === 0) {
+      for (const engine of payload.searchEngines) searchEngineSelect.add(new Option(engine.label, engine.id));
+    }
+    if (payload.defaultHomeUrl) homeUrlInput.placeholder = payload.defaultHomeUrl;
+    const engine = searchEngineSelect.querySelector(`option[value="${s.browsing.searchEngine}"]`);
+    if (engine) {
+      address.placeholder = `Search ${engine.textContent} or type a URL`;
+      startQ.placeholder = address.placeholder;
+    }
+    for (const input of settingsPage.querySelectorAll("[data-setting]")) {
+      // Never overwrite what the user is in the middle of typing or dragging.
+      if (input === document.activeElement && input.type !== "checkbox") continue;
+      const value = getPath(s, input.dataset.setting);
+      if (input.type === "checkbox") input.checked = Boolean(value);
+      else input.value = value == null ? "" : String(value);
+    }
+    for (const out of settingsPage.querySelectorAll("[data-output]")) {
+      out.textContent = `${getPath(s, out.dataset.output)}${out.dataset.suffix || ""}`;
+    }
+    for (const choice of settingsPage.querySelectorAll(".bg-choice")) {
+      const kind = choice.dataset.bg;
+      choice.setAttribute("aria-checked", String(s.newTab.background === kind));
+      if (kind === "custom") choice.disabled = !state.hasCustomBg;
+    }
+    bgThumbCustom.style.backgroundImage = state.hasCustomBg ? `url("${customBgUrl(s)}")` : "";
+    bgRemove.hidden = !state.hasCustomBg;
+  }
+
+  // The page is read from disk on every load but API routes only when the server starts,
+  // so after an update the new page can be talking to an old process. Say so plainly
+  // instead of surfacing that process's bare 404.
+  const STALE_SERVER = "The Perch server is running an older version — restart it to use settings";
+
+  function saveError(prefix, err) {
+    showSaved(err && err.status === 404 ? STALE_SERVER : `${prefix}: ${err.message}`, true);
+  }
+
+  function showSaved(text, isError) {
+    settingsSaved.textContent = text;
+    settingsSaved.classList.toggle("is-error", Boolean(isError));
+    settingsSaved.classList.add("is-visible");
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => settingsSaved.classList.remove("is-visible"), isError ? 6000 : 1600);
+  }
+
+  // Changes save themselves; rapid ones (dragging a slider) are folded into one request.
+  function queueSave(path, value) {
+    const [section, key] = path.split(".");
+    pendingPatch[section] = { ...pendingPatch[section], [key]: value };
+    if (state.settings) {
+      state.settings[section][key] = value;
+      applySettings({ settings: state.settings });
+    }
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, 250);
+  }
+
+  async function flushSave() {
+    const patch = pendingPatch;
+    pendingPatch = {};
+    try {
+      const reply = await api("/api/settings", { method: "PUT", body: JSON.stringify(patch) });
+      // An older server answers 200 but silently drops sections it has never heard of.
+      const dropped = Object.keys(patch).filter((section) => !(reply.settings && section in reply.settings));
+      for (const section of dropped) reply.settings[section] = { ...state.settings[section], ...patch[section] };
+      applySettings(reply);
+      if (dropped.length) showSaved(STALE_SERVER.replace("to use settings", "to keep this setting"), true);
+      else showSaved("Saved");
+    } catch (err) {
+      saveError("Could not save", err);
+      if (err.status !== 404) loadSettings();
+    }
+  }
+
+  async function loadSettings() {
+    try {
+      applySettings(await api("/api/settings"));
+    } catch (err) {
+      // An older server without settings: everything simply stays visible.
+      if (err.status === 404 && state.settingsOpen) showSaved(STALE_SERVER, true);
+    }
+  }
+
+  function toggleSettings(show) {
+    const on = show == null ? settingsPage.hidden : show;
+    if (on === !settingsPage.hidden) return;
+    settingsPage.hidden = !on;
+    state.settingsOpen = on;
+    btnSettings.classList.toggle("is-on", on);
+    btnSettings.setAttribute("aria-expanded", String(on));
+    if (on) {
+      toggleLatency(false);
+      blurKbd();
+      loadSettings();
+      refreshAbout();
+      settingsBody.scrollTop = 0;
+      document.getElementById("settings-close").focus({ preventScroll: true });
+    } else {
+      viewport.focus();
+    }
+  }
+
+  async function refreshAbout() {
+    document.getElementById("about-ip").textContent = ipChip.textContent.replace(/^IP · /, "");
+    try {
+      const health = await api("/health");
+      document.getElementById("about-server").textContent =
+        `build ${health.build ?? "?"} · ${(health.features || []).join(", ")}`;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Phones shoot 12-megapixel HEIC/JPEG files; the wallpaper never needs more than the
+  // screen can show. Decode, scale down (never up) and re-encode as WebP, falling back to
+  // JPEG where the browser cannot encode WebP. The aspect ratio is kept: the page crops
+  // with `background-size: cover`, which suits every screen shape better than a fixed crop.
+  async function prepareBackground(file) {
+    let source;
+    try {
+      source = await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      throw new Error("This file is not an image this browser can read");
+    }
+    const scale = Math.min(1, BG_MAX_W / source.width, BG_MAX_H / source.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(source.width * scale));
+    canvas.height = Math.max(1, Math.round(source.height * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    if (source.close) source.close();
+    const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+    let blob = await encode("image/webp", 0.86);
+    if (!blob || blob.type !== "image/webp") blob = await encode("image/jpeg", 0.88);
+    if (!blob) throw new Error("Could not convert the image");
+    return blob;
+  }
+
+  async function uploadBackground(file) {
+    bgError.hidden = true;
+    bgUpload.disabled = true;
+    bgUpload.textContent = "Converting…";
+    try {
+      const blob = await prepareBackground(file);
+      bgUpload.textContent = "Uploading…";
+      applySettings(
+        await api("/api/settings/background", { method: "PUT", headers: { "Content-Type": blob.type }, body: blob })
+      );
+      showSaved("Background updated");
+    } catch (err) {
+      bgError.textContent = err.status === 404 ? STALE_SERVER : err.message;
+      bgError.hidden = false;
+    } finally {
+      bgUpload.disabled = false;
+      bgUpload.textContent = "Upload image…";
+      bgFile.value = "";
+    }
+  }
+
+  // The shortcut hint names the modifier this device actually has.
+  const IS_APPLE = /mac|iphone|ipad/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "");
+  document.getElementById("start-kbd").textContent = IS_APPLE ? "⌘ K" : "Ctrl K";
+
+  btnSettings.addEventListener("click", () => toggleSettings());
+  document.getElementById("settings-close").addEventListener("click", () => toggleSettings(false));
+
+  settingsPage.addEventListener("input", (e) => {
+    const input = e.target.closest("[data-setting]");
+    if (!input || input.type === "checkbox" || input.type === "url" || input.tagName === "SELECT") return;
+    queueSave(input.dataset.setting, Number(input.value));
+  });
+
+  settingsPage.addEventListener("change", (e) => {
+    const input = e.target.closest("[data-setting]");
+    if (!input || input.type === "range") return;
+    queueSave(input.dataset.setting, input.type === "checkbox" ? input.checked : input.value.trim());
+  });
+
+  homeUrlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") homeUrlInput.blur();
+  });
+
+  for (const btn of settingsPage.querySelectorAll("[data-theme-choice]")) {
+    btn.addEventListener("click", () => queueSave("appearance.theme", btn.dataset.themeChoice));
+  }
+
+  for (const choice of settingsPage.querySelectorAll(".bg-choice")) {
+    choice.addEventListener("click", () => queueSave("newTab.background", choice.dataset.bg));
+  }
+
+  bgUpload.addEventListener("click", () => bgFile.click());
+  bgFile.addEventListener("change", () => {
+    if (bgFile.files && bgFile.files[0]) uploadBackground(bgFile.files[0]);
+  });
+  bgRemove.addEventListener("click", async () => {
+    try {
+      applySettings(await api("/api/settings/background", { method: "DELETE" }));
+      showSaved("Your image was removed");
+    } catch (err) {
+      saveError("Could not remove", err);
+    }
+  });
+
+  setAdblock.addEventListener("change", () => {
+    sendWs({ type: "adblock", enabled: setAdblock.checked });
+  });
+
+  // Two-step so a stray click cannot wipe the wallpaper.
+  const btnReset = document.getElementById("settings-reset");
+  let resetArmed = null;
+  btnReset.addEventListener("click", async () => {
+    if (!resetArmed) {
+      btnReset.textContent = "Click again to reset";
+      resetArmed = setTimeout(() => {
+        resetArmed = null;
+        btnReset.textContent = "Reset";
+      }, 4000);
+      return;
+    }
+    clearTimeout(resetArmed);
+    resetArmed = null;
+    btnReset.textContent = "Reset";
+    try {
+      applySettings(await api("/api/settings/reset", { method: "POST" }));
+      showSaved("Settings reset");
+    } catch (err) {
+      saveError("Could not reset", err);
+    }
+  });
+
+  const settingsLinks = [...settingsPage.querySelectorAll(".settings-nav a")];
+  for (const link of settingsLinks) {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      document.querySelector(link.getAttribute("href")).scrollIntoView({ block: "start" });
+    });
+  }
+  settingsBody.addEventListener("scroll", () => {
+    let current = settingsLinks[0];
+    for (const link of settingsLinks) {
+      const section = document.querySelector(link.getAttribute("href"));
+      if (section.offsetTop - settingsBody.scrollTop <= 90) current = link;
+    }
+    for (const link of settingsLinks) link.classList.toggle("is-current", link === current);
+  });
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(SETTINGS_CACHE_KEY) || "null");
+    if (cached && cached.settings && cached.settings.toolbar && cached.settings.newTab) applySettings(cached);
+  } catch {
+    // ignore a corrupt cache
+  }
+
   // ——— ad blocker ———
 
   // The switch lives on the server (one Chromium for every client), so the button only
@@ -222,6 +591,7 @@
     btnAdblock.classList.toggle("is-loading", loading);
     btnAdblock.classList.toggle("is-error", msg.status === "error");
     btnAdblock.setAttribute("aria-pressed", msg.enabled ? "true" : "false");
+    setAdblock.checked = Boolean(msg.enabled);
     adblockCheck.hidden = !on;
     const blocked = Number(msg.blocked) || 0;
     adblockCount.hidden = !on || blocked === 0;
@@ -334,7 +704,7 @@
       /^localhost(?::\d+)?(?:\/|$)/i.test(raw) ||
       /^\d{1,3}(\.\d{1,3}){3}(?::\d+)?(?:\/|$)/.test(raw);
     if (!looksLikeHost || /\s/.test(raw)) {
-      return `https://www.google.com/search?q=${encodeURIComponent(raw)}`;
+      return state.searchUrl.replace("%s", encodeURIComponent(raw));
     }
     return `https://${raw}`;
   }
@@ -866,6 +1236,7 @@
     setLive(false);
     seedTabs();
     connectSocket();
+    loadSettings();
     refreshIp();
     refreshTabs();
     sendResize();
@@ -1142,6 +1513,10 @@
       }
       if (msg.type === "adblock") {
         renderAdblock(msg);
+        return;
+      }
+      if (msg.type === "settings") {
+        applySettings(msg);
         return;
       }
       if (msg.type === "pong") {
@@ -1427,10 +1802,22 @@
       address.select();
       return true;
     }
+    // Only on the start page: once a site is showing, ⌘K belongs to that site.
+    if (meta && !e.shiftKey && !e.altKey && (e.key === "k" || e.key === "K") && !state.live && !startPage.classList.contains("no-search")) {
+      e.preventDefault();
+      startQ.focus();
+      startQ.select();
+      return true;
+    }
     return false;
   }
 
   window.addEventListener("keydown", (e) => {
+    // The settings page owns the keyboard while it is open; nothing reaches the remote.
+    if (state.settingsOpen) {
+      if (e.key === "Escape") toggleSettings(false);
+      return;
+    }
     if (handleShortcut(e)) return;
     if (e.key === "Escape" && isFullscreen()) return;
     if (!state.live) return;
@@ -1454,7 +1841,7 @@
   });
 
   window.addEventListener("keyup", (e) => {
-    if (!state.live) return;
+    if (!state.live || state.settingsOpen) return;
     if (isTypingTarget(e.target)) return;
     if (e.key === "F11") return;
     const meta = e.metaKey || e.ctrlKey;

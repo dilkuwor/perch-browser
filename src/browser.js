@@ -96,7 +96,9 @@ const IP_LOOKUP = new Set([
   "ifconfig",
 ]);
 
-function resolveUrl(input, homeUrl) {
+const DEFAULT_SEARCH_URL = "https://www.google.com/search?q=%s";
+
+function resolveUrl(input, homeUrl, searchUrl) {
   const raw = String(input ?? "").trim();
   if (!raw) return homeUrl || "https://www.google.com/";
   const lower = raw.toLowerCase();
@@ -111,7 +113,7 @@ function resolveUrl(input, homeUrl) {
     /^localhost(?::\d+)?(?:\/|$)/i.test(raw) ||
     /^\d{1,3}(\.\d{1,3}){3}(?::\d+)?(?:\/|$)/.test(raw);
   if (!looksLikeHost || /\s/.test(raw)) {
-    return `https://www.google.com/search?q=${encodeURIComponent(raw)}`;
+    return (searchUrl || DEFAULT_SEARCH_URL).replace("%s", encodeURIComponent(raw));
   }
   return `https://${raw}`;
 }
@@ -337,6 +339,8 @@ function isSessionGone(err) {
 class HomeBrowser {
   constructor({ homeUrl }) {
     this.homeUrl = homeUrl || "https://www.google.com/";
+    this.searchUrl = DEFAULT_SEARCH_URL;
+    this.jpegQuality = JPEG_QUALITY;
     this.browser = null;
     this.page = null;
     this.inputCdp = null;
@@ -661,7 +665,7 @@ class HomeBrowser {
 
   async newTab(rawUrl) {
     await this.ensure();
-    const href = rawUrl ? assertAllowedUrl(resolveUrl(rawUrl, this.homeUrl)) : "";
+    const href = rawUrl ? assertAllowedUrl(resolveUrl(rawUrl, this.homeUrl, this.searchUrl)) : "";
     const page = await this.browser.newPage();
     await this._adoptPage(page);
     if (href) return this._navigateTo(href);
@@ -834,7 +838,7 @@ class HomeBrowser {
     try {
       await this.paintCdp.send("Page.startScreencast", {
         format: "jpeg",
-        quality: JPEG_QUALITY,
+        quality: this.jpegQuality,
         maxWidth: this.viewport.width,
         maxHeight: this.viewport.height,
         everyNthFrame: 1,
@@ -880,7 +884,7 @@ class HomeBrowser {
     const epoch = this._frameEpoch();
     try {
       const result = await withTimeout(
-        this.paintCdp.send("Page.captureScreenshot", { format: "jpeg", quality: JPEG_QUALITY }),
+        this.paintCdp.send("Page.captureScreenshot", { format: "jpeg", quality: this.jpegQuality }),
         5000,
         null
       );
@@ -1014,6 +1018,19 @@ class HomeBrowser {
     this._syncAudio();
   }
 
+  // ——— settings ———
+
+  // Applies the parts of the user's settings that live in this process.
+  applySettings({ homeUrl, searchUrl, quality }) {
+    if (homeUrl) this.homeUrl = homeUrl;
+    if (searchUrl) this.searchUrl = searchUrl;
+    const q = clamp(Number(quality) || this.jpegQuality, 20, 95);
+    if (q !== this.jpegQuality) {
+      this.jpegQuality = q;
+      if (this._screencastOn) this._restartScreencast().catch(() => {});
+    }
+  }
+
   // ——— ad blocker ———
 
   _broadcastAdblock() {
@@ -1128,7 +1145,7 @@ class HomeBrowser {
   }
 
   async navigate(rawUrl) {
-    const href = assertAllowedUrl(resolveUrl(rawUrl, this.homeUrl));
+    const href = assertAllowedUrl(resolveUrl(rawUrl, this.homeUrl, this.searchUrl));
     await this.ensure();
     return this._navigateTo(href);
   }
@@ -1445,6 +1462,7 @@ class HomeBrowser {
 
 HomeBrowser.resolveUrl = resolveUrl;
 HomeBrowser.findChrome = findChrome;
+HomeBrowser.userDataDir = userDataDir;
 
 module.exports = {
   HomeBrowser,

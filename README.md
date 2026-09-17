@@ -22,6 +22,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 - **Egress from home.** Every site sees your home network's public IP, not the device in your hand.
 - **Sound.** What Chromium plays at home — video, music, calls — streams to the device as Opus (or raw PCM on browsers without WebCodecs), with a mute button in the title bar.
 - **Ad blocker.** One click on the shield in the title bar blocks ads, trackers, video ads, pop-ups, and cookie banners with the EasyList and uBlock Origin filter lists — and because ads are never rendered, there is less to stream.
+- **Settings.** A settings page for choosing which tools appear in the top bar, the new-tab wallpaper (upload your own), search engine, home page, and stream quality — saved on the server and shared by every device.
 - **Tabs.** A real tab strip to open, switch, and close tabs. Popups and SSO windows take over the view and hand it back when closed.
 - **Non-blocking navigation.** Keep full mouse and keyboard control while a page loads, with no stale frames after a URL change.
 - **Sign-in friendly.** Real key events, hover-before-click, and no automation banner, so Google's "are you human?" checks and corporate SSO behave like a local browser.
@@ -50,6 +51,14 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 Single Chromium session: there is one browser process. A second login uses — and can take over — that same session, sharing its cookies, tabs, and page.
 
 ## Run with Docker (recommended)
+
+A prebuilt image is published on Docker Hub as [`dpksamir/perch-browser`](https://hub.docker.com/r/dpksamir/perch-browser), so there is nothing to build — and with `docker run` you do not even need to clone this repository:
+
+```bash
+docker pull dpksamir/perch-browser:latest
+```
+
+Both methods below use that image. It bundles Chromium, Xvfb, PulseAudio, and ffmpeg, and is rebuilt from `main` whenever the app changes.
 
 ### Docker Compose
 
@@ -80,6 +89,8 @@ docker compose down
 
 ### `docker run`
 
+Straight from Docker Hub, no checkout required:
+
 ```bash
 docker volume create perch-chrome-profile
 
@@ -92,6 +103,13 @@ docker run -d \
   -v perch-chrome-profile:/data/chrome \
   --shm-size="1gb" \
   dpksamir/perch-browser:latest
+```
+
+Then open `http://<server>:8080` and sign in. To update later, pull the new image and recreate the container (the profile volume keeps your cookies and ad-blocker settings):
+
+```bash
+docker pull dpksamir/perch-browser:latest
+docker rm -f perch-browser    # then repeat the docker run command above
 ```
 
 ### Build from source
@@ -227,6 +245,17 @@ It works in layers, because no single technique catches everything:
 - **YouTube fallback.** If a video ad still slips through, it is muted and skipped to its end within a fraction of a second.
 
 To add your own rules, put them in `perch-adblock/custom-filters.txt` inside the Chrome profile directory (same syntax as uBlock Origin's "My filters") and restart. YouTube and Facebook actively fight ad blockers, so an ad can occasionally appear there until the lists catch up — usually within a day.
+
+### Settings
+
+The gear icon in the title bar opens the settings page (**Esc** or **Done** closes it). Changes save themselves, are stored on the server inside `CHROME_USER_DATA`, and apply to every signed-in device at once.
+
+- **Appearance.** Dark, Light, or Auto (follows each device's own light/dark preference). This themes Perch's own interface; websites and your wallpaper are untouched.
+- **Top bar.** Show or hide Latency, Ad blocker, Sound, Focus mode, Maximize, the Home and Keyboard buttons, and the status bar. Hidden tools keep working — a hidden ad blocker still blocks. Settings, Fullscreen, and Sign out are always shown so you cannot lock yourself out.
+- **New tab page.** Pick the bundled wallpaper, your own image, or none; set how much the image is dimmed; show or hide the search box and shortcuts. Uploads are resized (to at most 2560 × 1600) and converted to WebP in your browser first, so a 12-megapixel phone photo becomes a few hundred kilobytes. Any aspect ratio works: the image is cropped to fill the page on each screen.
+- **Browsing.** Search engine (Google, DuckDuckGo, Bing, Brave, Startpage), the Home button's page (overrides `HOME_URL`), and the ad-blocker switch.
+- **Streaming.** Picture quality, applied live (overrides `JPEG_QUALITY`).
+- **About.** Home IP, server build, and a reset button.
 
 ### Latency
 

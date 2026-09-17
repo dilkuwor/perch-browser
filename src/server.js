@@ -9,6 +9,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { Auth, clientIp } = require("./auth");
 const { HomeBrowser, resolveUrl } = require("./browser");
+const { Settings, SEARCH_ENGINES, BACKGROUND_MAX_BYTES } = require("./settings");
 
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const APP_USER = process.env.APP_USER || "admin";
@@ -27,6 +28,36 @@ if (!APP_PASSWORD) {
 
 const auth = new Auth({ password: APP_PASSWORD, user: APP_USER });
 const browser = new HomeBrowser({ homeUrl: HOME_URL });
+// Next to the ad blocker's data, inside the Chrome profile, so one volume persists it all.
+const settings = new Settings({ dataDir: path.join(HomeBrowser.userDataDir(), "perch-settings") });
+
+function applySettings() {
+  const s = settings.get();
+  browser.applySettings({
+    homeUrl: s.browsing.homeUrl || HOME_URL,
+    searchUrl: settings.searchUrl(),
+    quality: s.stream.quality,
+  });
+}
+applySettings();
+
+function settingsPayload() {
+  return {
+    settings: settings.get(),
+    searchUrl: settings.searchUrl(),
+    searchEngines: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({ id, label: e.label })),
+    defaultHomeUrl: HOME_URL,
+    hasCustomBackground: Boolean(settings.backgroundFile()),
+  };
+}
+
+// Every connected device follows along, so a phone and a laptop never disagree.
+function settingsChanged(res) {
+  applySettings();
+  const payload = settingsPayload();
+  browser.broadcast({ type: "settings", ...payload });
+  res.json({ ok: true, ...payload });
+}
 
 const app = express();
 app.set("trust proxy", 1);
@@ -45,7 +76,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     status: "ok",
     build: BUILD,
-    features: ["tabs", "binary-frames", "latency", "adblock", ...(browser.audioEnabled ? ["audio"] : [])],
+    features: ["tabs", "binary-frames", "latency", "adblock", "settings", ...(browser.audioEnabled ? ["audio"] : [])],
     chromium: browser.ready,
     audio: browser.audioEnabled ? (browser.audioActive ? "streaming" : "idle") : "disabled",
     user: APP_USER,
@@ -104,7 +135,7 @@ app.post("/api/navigate", auth.requireAuth.bind(auth), async (req, res) => {
   }
   try {
     const meta = await browser.navigate(url);
-    res.json({ ok: true, ...meta, resolved: resolveUrl(url, HOME_URL) });
+    res.json({ ok: true, ...meta, resolved: resolveUrl(url, browser.homeUrl, browser.searchUrl) });
   } catch (err) {
     res.status(503).json({ error: err.message || "Navigation failed" });
   }
@@ -122,6 +153,52 @@ app.post("/api/action", auth.requireAuth.bind(auth), async (req, res) => {
   } catch (err) {
     res.status(503).json({ error: err.message || "Action failed" });
   }
+});
+
+app.get("/api/settings", auth.requireAuth.bind(auth), (_req, res) => {
+  res.json({ ok: true, ...settingsPayload() });
+});
+
+app.put("/api/settings", auth.requireAuth.bind(auth), (req, res) => {
+  settings.update(req.body);
+  settingsChanged(res);
+});
+
+app.post("/api/settings/reset", auth.requireAuth.bind(auth), (_req, res) => {
+  settings.reset();
+  settingsChanged(res);
+});
+
+app.put(
+  "/api/settings/background",
+  auth.requireAuth.bind(auth),
+  express.raw({ type: ["image/webp", "image/jpeg", "image/png"], limit: BACKGROUND_MAX_BYTES }),
+  (req, res) => {
+    try {
+      settings.setBackground(req.body);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    settingsChanged(res);
+  }
+);
+
+app.delete("/api/settings/background", auth.requireAuth.bind(auth), (_req, res) => {
+  settings.removeBackground();
+  settingsChanged(res);
+});
+
+app.get("/api/background", auth.requireAuth.bind(auth), (_req, res) => {
+  const bg = settings.backgroundFile();
+  if (!bg) {
+    res.status(404).json({ error: "No custom background" });
+    return;
+  }
+  res.setHeader("Content-Type", bg.mime);
+  // The client adds ?v=<backgroundVersion>, so a given URL never changes content.
+  res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+  res.sendFile(bg.file);
 });
 
 app.get("/api/tabs", auth.requireAuth.bind(auth), async (_req, res) => {
@@ -155,10 +232,12 @@ app.use(express.static(path.join(__dirname, "..", "public"), {
   etag: true,
   maxAge: 0,
   index: "index.html",
-  setHeaders(res) {
+  setHeaders(res, file) {
     // no-store, not no-cache: some phones and reverse proxies keep serving a cached
     // app.js under no-cache. no-store guarantees a fresh client on every load.
-    res.setHeader("Cache-Control", "no-store, must-revalidate");
+    // Artwork is the exception — no reason to re-download the wallpaper on every visit.
+    const image = file.includes(`${path.sep}img${path.sep}`);
+    res.setHeader("Cache-Control", image ? "public, max-age=86400" : "no-store, must-revalidate");
   },
 }));
 
@@ -169,6 +248,12 @@ app.use((req, res) => {
   }
   res.setHeader("Cache-Control", "no-store, must-revalidate");
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
+});
+
+// Body-parser failures (oversized upload, malformed JSON) as JSON, like every other error.
+app.use((err, _req, res, _next) => {
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ error: status === 413 ? "Upload is too large" : err.message || "Request failed" });
 });
 
 const server = http.createServer(app);

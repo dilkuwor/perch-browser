@@ -1,20 +1,74 @@
-:root {
+:root,
+.login-screen {
+  color-scheme: dark;
   --bg: #07080b;
   --window: #0d1016;
   --chrome: #12161f;
   --chrome-2: #161b26;
+  --canvas: #090b10;
+  --field: #0d1118;
+  --field-2: #0a0d12;
+  --panel: rgba(18, 22, 31, 0.98);
   --text: #f3f5f8;
   --muted: #9aa3b2;
+  --placeholder: #6d7686;
   --accent: #6ea8ff;
+  --accent-rgb: 110, 168, 255;
+  --on-accent: #0b0e14;
   --accent-2: #8b7bff;
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.12);
+  /* Base of every translucent overlay (hovers, hairlines): white on dark, ink on light. */
+  --tint: 255, 255, 255;
+  --line: rgba(var(--tint), 0.07);
+  --line-strong: rgba(var(--tint), 0.12);
   --ok: #3dd68c;
   --danger: #ff6b6b;
   --lock: #3dd68c;
   --shadow: 0 40px 90px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-pop: 0 18px 40px rgba(0, 0, 0, 0.5);
+  --aura-1: 110, 80, 210, 0.28;
+  --aura-2: 50, 110, 220, 0.22;
+  --aura-3: 40, 80, 170, 0.16;
+}
+
+:root {
   --radius: 16px;
   --font: "SF Pro Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Light theme. The sign-in screen re-declares the dark tokens above on itself, so that
+   hero stays dark; the remote page and the wallpaper are never themed. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e6eaf2;
+  --window: #ffffff;
+  --chrome: #f1f3f8;
+  --chrome-2: #f8f9fc;
+  --canvas: #eef1f7;
+  --field: #ffffff;
+  --field-2: #ffffff;
+  --panel: rgba(255, 255, 255, 0.98);
+  --text: #131823;
+  --muted: #5d6676;
+  --placeholder: #8a93a3;
+  --accent: #2563eb;
+  --accent-rgb: 37, 99, 235;
+  --on-accent: #ffffff;
+  --accent-2: #6d5ae6;
+  --tint: 15, 23, 42;
+  --line: rgba(var(--tint), 0.1);
+  --line-strong: rgba(var(--tint), 0.17);
+  --ok: #12a05f;
+  --danger: #d93838;
+  --lock: #12a05f;
+  --shadow: 0 30px 70px rgba(30, 41, 80, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  --shadow-pop: 0 18px 40px rgba(30, 41, 80, 0.2);
+  --aura-1: 120, 100, 230, 0.2;
+  --aura-2: 70, 130, 240, 0.18;
+  --aura-3: 90, 120, 210, 0.14;
+}
+
+.login-screen {
+  color: var(--text);
 }
 
 *,
@@ -33,9 +87,9 @@ body {
   font-family: var(--font);
   color: var(--text);
   background:
-    radial-gradient(1100px 640px at 12% -8%, rgba(110, 80, 210, 0.28), transparent 55%),
-    radial-gradient(900px 560px at 92% 8%, rgba(50, 110, 220, 0.22), transparent 52%),
-    radial-gradient(800px 480px at 50% 115%, rgba(40, 80, 170, 0.16), transparent 50%),
+    radial-gradient(1100px 640px at 12% -8%, rgba(var(--aura-1)), transparent 55%),
+    radial-gradient(900px 560px at 92% 8%, rgba(var(--aura-2)), transparent 52%),
+    radial-gradient(800px 480px at 50% 115%, rgba(var(--aura-3)), transparent 50%),
     var(--bg);
   overflow: hidden;
 }
@@ -347,6 +401,7 @@ input {
 }
 
 .browser-window {
+  position: relative;
   width: min(1200px, 100%);
   height: min(820px, calc(100vh - 56px));
   background: var(--window);
@@ -467,7 +522,7 @@ body.is-focus .statusbar {
 }
 
 .tab:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--tint), 0.04);
   color: var(--text);
 }
 
@@ -494,7 +549,7 @@ body.is-focus .statusbar {
 }
 
 .tab-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(var(--tint), 0.1);
   opacity: 1;
 }
 
@@ -514,7 +569,7 @@ body.is-focus .statusbar {
 }
 
 .tab-new:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--tint), 0.06);
   color: var(--text);
 }
 
@@ -564,7 +619,7 @@ body.is-focus .statusbar {
   padding: 0 3px;
   border-radius: 7px;
   background: var(--accent);
-  color: #0b0e14;
+  color: var(--on-accent);
   font-size: 9px;
   font-weight: 700;
   line-height: 13px;
@@ -592,9 +647,9 @@ body.is-focus .statusbar {
   width: 210px;
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(18, 22, 31, 0.98);
+  background: var(--panel);
   border: 1px solid var(--line-strong);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-pop);
   font-size: 12px;
   color: var(--muted);
 }
@@ -627,7 +682,7 @@ body.is-focus .statusbar {
 
 .tab.active .tab-favicon {
   background: var(--accent);
-  box-shadow: 0 0 8px rgba(110, 168, 255, 0.7);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.7);
 }
 
 .tab-title {
@@ -656,7 +711,7 @@ body.is-focus .statusbar {
 }
 
 .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--tint), 0.06);
   color: var(--text);
 }
 
@@ -666,7 +721,7 @@ body.is-focus .statusbar {
 
 .icon-btn.is-on {
   color: var(--accent);
-  background: rgba(110, 168, 255, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .toolbar {
@@ -692,14 +747,14 @@ body.is-focus .statusbar {
   height: 36px;
   padding: 0 6px 0 12px;
   border-radius: 999px;
-  background: #0a0d12;
+  background: var(--field-2);
   border: 1px solid var(--line-strong);
   gap: 8px;
 }
 
 .omnibox:focus-within {
-  border-color: rgba(110, 168, 255, 0.65);
-  box-shadow: 0 0 0 3px rgba(110, 168, 255, 0.14);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
 }
 
 .omnibox-lock {
@@ -721,7 +776,7 @@ body.is-focus .statusbar {
 }
 
 .omnibox-input::placeholder {
-  color: #6d7686;
+  color: var(--placeholder);
 }
 
 .go-btn {
@@ -729,7 +784,7 @@ body.is-focus .statusbar {
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
-  background: rgba(110, 168, 255, 0.16);
+  background: rgba(var(--accent-rgb), 0.16);
   color: var(--accent);
   font-weight: 650;
   font-size: 12px;
@@ -737,14 +792,14 @@ body.is-focus .statusbar {
 }
 
 .go-btn:hover {
-  background: rgba(110, 168, 255, 0.28);
+  background: rgba(var(--accent-rgb), 0.28);
 }
 
 .viewport {
   flex: 1;
   min-height: 0;
   position: relative;
-  background: #090b10;
+  background: var(--canvas);
   outline: none;
   overflow: hidden;
   touch-action: none;
@@ -789,57 +844,265 @@ body.is-focus .statusbar {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 20px 48px;
+  padding: 32px 20px 96px;
   background:
-    radial-gradient(600px 280px at 50% 0%, rgba(110, 168, 255, 0.08), transparent 70%),
-    #090b10;
+    radial-gradient(600px 280px at 50% 0%, rgba(var(--accent-rgb), 0.08), transparent 70%),
+    var(--canvas);
+  isolation: isolate;
+}
+
+/* Wallpaper and its dimming layer sit behind the content; `cover` crops any image
+   shape to the viewport, so no particular aspect ratio is required. */
+.start-page.has-bg::before,
+.start-page.has-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+
+.start-page.has-bg::before {
+  background: #090b10 var(--start-bg) center / cover no-repeat;
+}
+
+.start-page.has-bg::after {
+  background: rgba(5, 7, 12, var(--start-dim, 0.35));
+}
+
+.start-page.has-bg h2 {
+  --h-from: #fff;
+  --h-to: #b9c8ff;
+  filter: drop-shadow(0 2px 14px rgba(0, 0, 0, 0.55));
+}
+
+.start-page.has-bg .start-sub {
+  color: rgba(255, 255, 255, 0.84);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6);
+}
+
+.start-page.has-bg .dial-label {
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.65);
+}
+
+.start-page.has-bg .start-kicker {
+  color: #9cc2ff;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
+
+/* Light theme without a wallpaper: dark glass turns muddy on a pale canvas, so the tiles
+   become frosted white and the glyphs take ink colours. */
+:root[data-theme="light"] .start-page:not(.has-bg) .dial-icon {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(15, 23, 42, 0.09);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 10px 26px rgba(30, 41, 80, 0.13),
+    0 0 22px rgba(99, 102, 241, 0.06);
+}
+
+:root[data-theme="light"] .start-page:not(.has-bg) .dial:hover .dial-icon,
+:root[data-theme="light"] .start-page:not(.has-bg) .dial:focus-visible .dial-icon {
+  background: #fff;
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 16px 32px rgba(30, 41, 80, 0.17),
+    0 0 28px rgba(99, 102, 241, 0.16);
+}
+
+:root[data-theme="light"] .start-page:not(.has-bg) .dial-icon.ip {
+  color: #2563eb;
+}
+
+:root[data-theme="light"] .start-page:not(.has-bg) .dial-icon.wiki {
+  color: #131823;
+}
+
+/* Without a wallpaper the labels sit on the themed canvas, not on a photo. */
+.start-page:not(.has-bg) .dial-label {
+  color: var(--muted);
+}
+
+.start-page:not(.has-bg) .dial:hover .dial-label,
+.start-page:not(.has-bg) .dial:focus-visible .dial-label {
+  color: var(--text);
+}
+
+.start-page.no-search .start-search,
+.start-page.no-shortcuts .dials {
+  display: none;
+}
+
+.is-user-hidden {
+  display: none !important;
 }
 
 .start-kicker {
   margin: 0;
-  letter-spacing: 0.2em;
+  /* Tracking adds space after the last letter too; this keeps the line optically centred. */
+  padding-left: 3px;
+  letter-spacing: 3px;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: 16px;
+  line-height: 1.2;
   color: var(--accent);
   font-weight: 600;
+  text-align: center;
 }
 
+/* Display heading. The gradient fill is clipped to the glyphs, so depth over a wallpaper
+   comes from a drop-shadow filter — text-shadow would show through transparent text. */
 .start-page h2 {
-  margin: 8px 0 0;
+  --h-from: var(--text);
+  --h-to: #93a4c8;
+  margin: 10px 0 0;
+  font-family: Inter, "SF Pro Display", var(--font);
   font-size: 36px;
-  letter-spacing: -0.04em;
+  line-height: 1.1;
+  letter-spacing: -1.1px;
   font-weight: 650;
+  text-align: center;
+  color: var(--h-from);
+  background: linear-gradient(180deg, var(--h-from) 35%, var(--h-to) 115%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  /* Room for descenders, which background-clip would otherwise shave. */
+  padding-bottom: 0.08em;
+}
+
+/* On the plain light page the title is solid ink, like a native app's. */
+:root[data-theme="light"] .start-page:not(.has-bg) h2 {
+  --h-from: #111827;
+  --h-to: #111827;
 }
 
 .start-sub {
-  margin: 8px 0 22px;
+  margin: 8px 0 24px;
   color: var(--muted);
-  font-size: 14px;
+  font-family: Inter, var(--font);
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
   text-align: center;
-  max-width: 420px;
-  line-height: 1.45;
+  max-width: 560px;
+  line-height: 1.35;
 }
 
+:root[data-theme="light"] .start-page:not(.has-bg) .start-sub {
+  color: #667085;
+}
+
+/* Search bar: one glass pill. The label is the visual field, so a click anywhere on it
+   (icon and shortcut hint included) lands in the input. */
 .start-search {
-  width: min(520px, 100%);
+  --bar-bg: rgba(15, 23, 42, 0.5);
+  --bar-border: rgba(255, 255, 255, 0.14);
+  --bar-border-hover: rgba(255, 255, 255, 0.24);
+  --bar-shadow: 0 8px 30px rgba(0, 0, 0, 0.28);
+  --bar-shadow-hover: 0 10px 34px rgba(0, 0, 0, 0.34);
+  --bar-text: #fff;
+  --bar-muted: rgba(255, 255, 255, 0.56);
+  --bar-ring: rgba(110, 168, 255, 0.2);
+  --bar-ring-border: rgba(110, 168, 255, 0.55);
+  --kbd-bg: rgba(255, 255, 255, 0.08);
+  --kbd-border: rgba(255, 255, 255, 0.14);
+  width: min(600px, 70vw);
   margin-bottom: 28px;
 }
 
+:root[data-theme="light"] .start-search {
+  --bar-bg: rgba(255, 255, 255, 0.72);
+  --bar-border: rgba(15, 23, 42, 0.12);
+  --bar-border-hover: rgba(15, 23, 42, 0.2);
+  --bar-shadow: 0 8px 30px rgba(30, 64, 175, 0.08);
+  --bar-shadow-hover: 0 10px 34px rgba(30, 64, 175, 0.12);
+  --bar-text: #111827;
+  --bar-muted: #667085;
+  --bar-ring: rgba(37, 99, 235, 0.12);
+  --bar-ring-border: rgba(37, 99, 235, 0.45);
+  --kbd-bg: rgba(15, 23, 42, 0.045);
+  --kbd-border: rgba(15, 23, 42, 0.1);
+}
+
+.start-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 50px;
+  padding: 0 14px 0 20px;
+  border-radius: 25px;
+  background: var(--bar-bg);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--bar-border);
+  box-shadow: var(--bar-shadow);
+  cursor: text;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.start-search-bar:hover {
+  border-color: var(--bar-border-hover);
+  box-shadow: var(--bar-shadow-hover);
+}
+
+.start-search-bar:focus-within {
+  border-color: var(--bar-ring-border);
+  box-shadow:
+    0 0 0 3px var(--bar-ring),
+    0 10px 35px rgba(30, 64, 175, 0.1);
+}
+
+.start-search-icon {
+  flex-shrink: 0;
+  color: var(--bar-muted);
+}
+
 .start-search input {
-  width: 100%;
-  height: 44px;
-  border-radius: 999px;
-  border: 1px solid var(--line-strong);
-  background: #0d1118;
-  color: var(--text);
-  padding: 0 18px;
-  font-size: 14px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--bar-text);
+  font-family: Inter, var(--font);
+  font-size: 15.5px;
+  letter-spacing: -0.005em;
   outline: none;
 }
 
-.start-search input:focus {
-  border-color: rgba(110, 168, 255, 0.65);
-  box-shadow: 0 0 0 3px rgba(110, 168, 255, 0.14);
+.start-search input::placeholder {
+  color: var(--bar-muted);
+}
+
+.start-search-kbd {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--kbd-border);
+  background: var(--kbd-bg);
+  color: var(--bar-muted);
+  font-family: var(--font);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  transition: opacity 160ms ease;
+}
+
+/* The hint is for getting to the field; once you are in it, it steps back. */
+.start-search-bar:focus-within .start-search-kbd {
+  opacity: 0;
+}
+
+/* No hardware keyboard, no shortcut to advertise. */
+@media (hover: none) {
+  .start-search-kbd {
+    display: none;
+  }
 }
 
 .dials {
@@ -858,8 +1121,12 @@ body.is-focus .statusbar {
   align-items: center;
   gap: 10px;
   padding: 0;
+  font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
 }
 
+/* Floating glass tile. The brand lives in the glyph colour, not in a filled background,
+   so every tile is the same material and the wallpaper shows through all of them. */
 .dial-icon {
   width: 64px;
   height: 64px;
@@ -868,45 +1135,91 @@ body.is-focus .statusbar {
   place-items: center;
   font-weight: 750;
   font-size: 22px;
-  background: #141924;
-  border: 1px solid var(--line-strong);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  line-height: 1;
+  background: rgba(15, 23, 42, 0.45);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid rgba(186, 210, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 10px 28px rgba(2, 6, 18, 0.42),
+    0 0 22px rgba(124, 138, 255, 0.07);
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background-color 200ms ease,
+    backdrop-filter 200ms ease,
+    -webkit-backdrop-filter 200ms ease;
 }
 
-.dial:hover .dial-icon {
-  transform: translateY(-2px);
-  border-color: rgba(110, 168, 255, 0.45);
+.dial:hover .dial-icon,
+.dial:focus-visible .dial-icon {
+  transform: translateY(-3px);
+  background: rgba(24, 34, 58, 0.5);
+  /* Brightens the glass rather than the glyph, so the icon itself stays crisp. */
+  -webkit-backdrop-filter: blur(14px) saturate(1.4) brightness(1.18);
+  backdrop-filter: blur(14px) saturate(1.4) brightness(1.18);
+  border-color: rgba(170, 196, 255, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 16px 34px rgba(2, 6, 18, 0.48),
+    0 0 30px rgba(124, 138, 255, 0.2);
 }
 
-.dial-icon.google {
-  color: #8ab4f8;
-  background: linear-gradient(180deg, #1a2333, #141924);
+.dial:active .dial-icon {
+  transform: translateY(0) scale(0.97);
+  transition-duration: 90ms;
 }
 
-.dial-icon.youtube {
-  color: #fff;
-  background: linear-gradient(180deg, #e23d3d, #b91c1c);
-  font-size: 18px;
+.dial:focus-visible {
+  outline: none;
+}
+
+.dial:focus-visible .dial-icon {
+  border-color: rgba(170, 196, 255, 0.75);
+}
+
+.dial-icon svg {
+  display: block;
 }
 
 .dial-icon.ip {
-  color: #071018;
-  background: linear-gradient(180deg, #8bb6ff, #5b96f0);
+  color: #9cc2ff;
   font-size: 16px;
   letter-spacing: 0.04em;
 }
 
 .dial-icon.wiki {
-  color: var(--text);
-  background: linear-gradient(180deg, #2a3140, #171c26);
+  color: #f3f5f8;
   font-family: "Times New Roman", Times, serif;
   font-style: italic;
   font-size: 26px;
 }
 
 .dial-label {
-  font-size: 12px;
-  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.72);
+  transition: color 200ms ease;
+}
+
+.dial:hover .dial-label,
+.dial:focus-visible .dial-label {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dial-icon {
+    transition: none;
+  }
+
+  .dial:hover .dial-icon,
+  .dial:focus-visible .dial-icon,
+  .dial:active .dial-icon {
+    transform: none;
+  }
 }
 
 .stream {
@@ -929,7 +1242,7 @@ body.is-focus .statusbar {
   color: var(--muted);
   font-size: 14px;
   letter-spacing: 0.02em;
-  background: #090b10;
+  background: var(--canvas);
 }
 
 .viewport.is-live .start-page {
@@ -957,7 +1270,7 @@ body.is-focus .statusbar {
   height: 22px;
   margin: 0 auto 12px;
   border-radius: 50%;
-  border: 2px solid rgba(110, 168, 255, 0.25);
+  border: 2px solid rgba(var(--accent-rgb), 0.25);
   border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
@@ -1023,13 +1336,438 @@ body.is-focus .statusbar {
   height: 20px;
   padding: 0 8px;
   border-radius: 999px;
-  background: rgba(110, 168, 255, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
 
+/* ——— settings page ——— */
+
+.settings-page {
+  position: absolute;
+  inset: 42px 0 0;
+  z-index: 30;
+  display: flex;
+  background: var(--window);
+  color: var(--text);
+}
+
+.settings-page[hidden] {
+  display: none;
+}
+
+.settings-nav {
+  width: 210px;
+  flex-shrink: 0;
+  padding: 22px 12px;
+  border-right: 1px solid var(--line);
+  background: var(--chrome);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav h2 {
+  margin: 0 10px 14px;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+}
+
+.settings-nav a {
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13.5px;
+}
+
+.settings-nav a:hover {
+  color: var(--text);
+  background: rgba(var(--tint), 0.05);
+}
+
+.settings-nav a.is-current {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.settings-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 28px 64px;
+  scroll-behavior: smooth;
+}
+
+.settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 14px 0 10px;
+  background: linear-gradient(var(--window) 75%, transparent);
+}
+
+.settings-saved {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ok);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.settings-saved.is-visible {
+  opacity: 1;
+}
+
+.settings-saved.is-error {
+  color: var(--danger);
+}
+
+.set-section {
+  max-width: 660px;
+  margin: 0 auto 34px;
+  scroll-margin-top: 58px;
+}
+
+.set-section h3 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+
+.set-section h4 {
+  margin: 22px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.set-lead {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.set-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--chrome);
+  margin-top: 10px;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 16px;
+  cursor: default;
+}
+
+.set-row + .set-row {
+  border-top: 1px solid var(--line);
+}
+
+label.set-row {
+  cursor: pointer;
+}
+
+.set-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  cursor: default;
+}
+
+.set-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.set-title {
+  font-size: 14px;
+}
+
+.set-desc {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.set-lock {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 10.5px;
+  vertical-align: 1px;
+}
+
+.set-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: rgba(var(--tint), 0.14);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.set-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.set-switch:checked {
+  background: var(--accent);
+}
+
+.set-switch:checked::after {
+  transform: translateX(16px);
+}
+
+.set-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.set-switch:focus-visible,
+.set-btn:focus-visible,
+.bg-choice:focus-visible,
+.set-select:focus-visible,
+.set-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.set-segment {
+  display: flex;
+  flex-shrink: 0;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+}
+
+.set-segment button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.set-segment button:hover {
+  color: var(--text);
+}
+
+.set-segment button[aria-checked="true"] {
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+}
+
+.set-segment button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.set-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.set-range input {
+  width: 150px;
+  accent-color: var(--accent);
+}
+
+.set-range output {
+  width: 38px;
+  text-align: right;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.set-select,
+.set-input {
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+  color: var(--text);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.set-input {
+  width: 100%;
+}
+
+.set-btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: rgba(var(--tint), 0.06);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.set-btn:hover {
+  background: rgba(var(--tint), 0.11);
+}
+
+.set-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.set-btn[hidden] {
+  display: none;
+}
+
+.set-btn-quiet {
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.set-btn-danger {
+  color: var(--danger);
+  border-color: rgba(255, 107, 107, 0.35);
+}
+
+.set-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.set-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.set-error[hidden] {
+  display: none;
+}
+
+.bg-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bg-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 6px 6px 8px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.bg-choice[aria-checked="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.bg-choice:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.bg-thumb {
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: 7px;
+  background: #090b10 center / cover no-repeat;
+}
+
+.bg-thumb-default {
+  background-image: url("img/newtab-default.webp");
+}
+
+.bg-thumb-custom {
+  background-image: repeating-linear-gradient(45deg, rgba(var(--tint), 0.04) 0 8px, transparent 8px 16px);
+}
+
+.bg-thumb-none {
+  background: radial-gradient(120px 60px at 50% 0%, rgba(var(--accent-rgb), 0.18), transparent 70%), #090b10;
+}
+
 @media (max-width: 720px) {
+  .settings-page {
+    flex-direction: column;
+  }
+
+  .settings-nav {
+    width: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .settings-nav h2 {
+    display: none;
+  }
+
+  .settings-body {
+    padding: 0 14px 48px;
+  }
+
+  .set-range input {
+    width: 110px;
+  }
+
   .app-screen {
     padding: 0;
   }
@@ -1045,8 +1783,39 @@ body.is-focus .statusbar {
     grid-template-columns: repeat(2, minmax(88px, 110px));
   }
 
+  .start-page {
+    padding-bottom: 56px;
+  }
+
+  .start-kicker {
+    font-size: 13px;
+    letter-spacing: 2.5px;
+    padding-left: 2.5px;
+  }
+
   .start-page h2 {
-    font-size: 28px;
+    font-size: 30px;
+    letter-spacing: -0.9px;
+  }
+
+  .start-sub {
+    margin: 8px 0 22px;
+    font-size: 14.5px;
+  }
+
+  .start-search {
+    width: 100%;
+  }
+
+  .start-search-bar {
+    height: 48px;
+    padding: 0 14px 0 18px;
+    gap: 10px;
+    border-radius: 24px;
+  }
+
+  .start-search input {
+    font-size: 16px;
   }
 
   .tab {

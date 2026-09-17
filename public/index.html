@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#07080b" />
   <title>Perch</title>
+  <script>
+    // Before first paint, so a light-theme user never sees a dark flash. app.js keeps the
+    // cached value in step with the server's setting.
+    (function () {
+      try {
+        var t = localStorage.getItem("perch.theme") || "dark";
+        if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+      } catch (e) {}
+    })();
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237cb6ff'/%3E%3Cstop offset='1' stop-color='%238b7bff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 15 L16 9 L23 15'/%3E%3Ccircle cx='16' cy='19' r='4.6'/%3E%3Cpath d='M11.4 19 H20.6'/%3E%3C/g%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
@@ -210,6 +221,12 @@
               <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
             </svg>
           </button>
+          <button type="button" class="icon-btn" id="btn-settings" title="Settings" aria-label="Settings" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.5-2-3.4-2.3.9a7.5 7.5 0 0 0-2.6-1.5L14 2.5h-4l-.5 2.5A7.5 7.5 0 0 0 6.9 6.5l-2.3-.9-2 3.4 2 1.5a7.6 7.6 0 0 0 0 3l-2 1.5 2 3.4 2.3-.9a7.5 7.5 0 0 0 2.6 1.5l.5 2.5h4l.5-2.5a7.5 7.5 0 0 0 2.6-1.5l2.3.9 2-3.4-2-1.5z" />
+            </svg>
+          </button>
           <button type="button" class="icon-btn" id="btn-logout" title="Sign out" aria-label="Sign out">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M10 7V5a2 2 0 0 1 2-2h7v18h-7a2 2 0 0 1-2-2v-2" />
@@ -274,17 +291,36 @@
         <div id="start-page" class="start-page">
           <p class="start-kicker">Perch</p>
           <h2>New Tab</h2>
-          <p class="start-sub">This Chromium runs on the home server. What is my IP is the house public IP.</p>
+          <p class="start-sub">Your private window to the web.</p>
           <form id="start-search" class="start-search" action="#">
-            <input id="start-q" type="text" placeholder="Search Google or type a URL" spellcheck="false" autocomplete="off" />
+            <label class="start-search-bar">
+              <svg class="start-search-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5" />
+                <path d="M16 16l4.5 4.5" />
+              </svg>
+              <input id="start-q" type="text" placeholder="Search Google or type a URL" spellcheck="false" autocomplete="off" />
+              <kbd class="start-search-kbd" id="start-kbd" aria-hidden="true">⌘ K</kbd>
+            </label>
           </form>
           <div class="dials">
             <button type="button" class="dial" data-url="https://www.google.com/">
-              <span class="dial-icon google">G</span>
+              <span class="dial-icon google">
+                <svg viewBox="0 0 48 48" width="28" height="28" aria-hidden="true">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                </svg>
+              </span>
               <span class="dial-label">Google</span>
             </button>
             <button type="button" class="dial" data-url="https://www.youtube.com/">
-              <span class="dial-icon youtube">▶</span>
+              <span class="dial-icon youtube">
+                <svg viewBox="0 0 28.57 20" width="34" height="24" aria-hidden="true">
+                  <path fill="#FF0000" d="M27.9727 3.12324C27.6435 1.89323 26.6768 0.926623 25.4468 0.597366C23.2197 0 14.285 0 14.285 0C14.285 0 5.35042 0 3.12323 0.597366C1.89323 0.926623 0.926623 1.89323 0.597366 3.12324C0 5.35042 0 10 0 10C0 10 0 14.6496 0.597366 16.8768C0.926623 18.1068 1.89323 19.0734 3.12323 19.4026C5.35042 20 14.285 20 14.285 20C14.285 20 23.2197 20 25.4468 19.4026C26.6768 19.0734 27.6435 18.1068 27.9727 16.8768C28.5701 14.6496 28.5701 10 28.5701 10C28.5701 10 28.5677 5.35042 27.9727 3.12324Z" />
+                  <path fill="#FFFFFF" d="M11.4253 14.2854L18.8477 10.0004L11.4253 5.71533V14.2854Z" />
+                </svg>
+              </span>
               <span class="dial-label">YouTube</span>
             </button>
             <button type="button" class="dial" data-url="https://ifconfig.me/">
@@ -301,6 +337,174 @@
         <canvas id="stream" class="stream" aria-hidden="true"></canvas>
         <textarea id="kbd" class="kbd" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Remote keyboard input"></textarea>
       </div>
+
+      <section id="settings-page" class="settings-page" aria-label="Settings" hidden>
+        <nav class="settings-nav" aria-label="Settings sections">
+          <h2>Settings</h2>
+          <a href="#set-appearance" class="is-current">Appearance</a>
+          <a href="#set-toolbar">Top bar</a>
+          <a href="#set-newtab">New tab page</a>
+          <a href="#set-browsing">Browsing</a>
+          <a href="#set-stream">Streaming</a>
+          <a href="#set-about">About</a>
+        </nav>
+        <div class="settings-body" id="settings-body">
+          <header class="settings-head">
+            <p id="settings-saved" class="settings-saved" role="status" aria-live="polite"></p>
+            <button type="button" class="set-btn" id="settings-close">Done</button>
+          </header>
+
+          <section class="set-section" id="set-appearance">
+            <h3>Appearance</h3>
+            <div class="set-card">
+              <div class="set-row">
+                <span class="set-text"><span class="set-title">Theme</span><span class="set-desc">Colours of Perch itself. Websites and your wallpaper are not changed.</span></span>
+                <div class="set-segment" role="radiogroup" aria-label="Theme">
+                  <button type="button" role="radio" data-theme-choice="dark">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+                    Dark
+                  </button>
+                  <button type="button" role="radio" data-theme-choice="light">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" /></svg>
+                    Light
+                  </button>
+                  <button type="button" role="radio" data-theme-choice="system">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2" /><path d="M9 20h6" stroke-linecap="round" /></svg>
+                    Auto
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="set-section" id="set-toolbar">
+            <h3>Top bar</h3>
+            <p class="set-lead">Choose which tools appear. Hidden tools keep working — a hidden ad blocker still blocks.</p>
+            <div class="set-card">
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Latency</span><span class="set-desc">Connection stats: round trip, frame rate, bandwidth.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.latency" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Ad blocker</span><span class="set-desc">The shield that switches ad blocking on and off.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.adblock" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Sound</span><span class="set-desc">Mute and unmute the remote browser.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.audio" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Focus mode</span><span class="set-desc">Hide the browser chrome and show only the page.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.focus" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Maximize</span><span class="set-desc">Stretch the window to fill this browser tab.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.maximize" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Fullscreen <span class="set-lock">Always shown</span></span><span class="set-desc">Take over the whole screen (F11).</span></span>
+                <input type="checkbox" class="set-switch" checked disabled />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Settings <span class="set-lock">Always shown</span></span><span class="set-desc">This page.</span></span>
+                <input type="checkbox" class="set-switch" checked disabled />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Sign out <span class="set-lock">Always shown</span></span><span class="set-desc">End the session on this device.</span></span>
+                <input type="checkbox" class="set-switch" checked disabled />
+              </label>
+            </div>
+            <h4>Navigation bar and status bar</h4>
+            <div class="set-card">
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Home button</span><span class="set-desc">Next to Back, Forward and Reload.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.home" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Keyboard button</span><span class="set-desc">Opens the on-screen keyboard on phones and tablets.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.keyboard" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Status bar</span><span class="set-desc">Connection state and home IP along the bottom edge.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="toolbar.statusbar" />
+              </label>
+            </div>
+          </section>
+
+          <section class="set-section" id="set-newtab">
+            <h3>New tab page</h3>
+            <p class="set-lead">The page you see before a site is loaded.</p>
+            <div class="set-card">
+              <div class="set-row set-row-stack">
+                <span class="set-text"><span class="set-title">Background</span><span class="set-desc">Any photo works: it is resized and converted in your browser before upload, and always fills the page whatever its shape.</span></span>
+                <div class="bg-choices" role="radiogroup" aria-label="Background">
+                  <button type="button" class="bg-choice" data-bg="default" role="radio"><span class="bg-thumb bg-thumb-default"></span><span>Default</span></button>
+                  <button type="button" class="bg-choice" data-bg="custom" role="radio"><span class="bg-thumb bg-thumb-custom" id="bg-thumb-custom"></span><span>Your image</span></button>
+                  <button type="button" class="bg-choice" data-bg="none" role="radio"><span class="bg-thumb bg-thumb-none"></span><span>None</span></button>
+                </div>
+                <div class="set-actions">
+                  <button type="button" class="set-btn" id="bg-upload">Upload image…</button>
+                  <button type="button" class="set-btn set-btn-quiet" id="bg-remove" hidden>Remove your image</button>
+                  <input type="file" id="bg-file" accept="image/*" hidden />
+                </div>
+                <p class="set-error" id="bg-error" hidden></p>
+              </div>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Dim the background</span><span class="set-desc">Darkens the image so text stays readable.</span></span>
+                <span class="set-range"><input type="range" min="0" max="80" step="5" data-setting="newTab.dim" /><output data-output="newTab.dim" data-suffix="%"></output></span>
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Search box</span><span class="set-desc">Search or type an address from the new tab page.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="newTab.search" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Shortcuts</span><span class="set-desc">Google, YouTube, Find my IP and Wikipedia tiles.</span></span>
+                <input type="checkbox" class="set-switch" data-setting="newTab.shortcuts" />
+              </label>
+            </div>
+          </section>
+
+          <section class="set-section" id="set-browsing">
+            <h3>Browsing</h3>
+            <div class="set-card">
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Search engine</span><span class="set-desc">Used when you type words instead of an address.</span></span>
+                <select class="set-select" data-setting="browsing.searchEngine" id="set-search-engine"></select>
+              </label>
+              <label class="set-row set-row-stack">
+                <span class="set-text"><span class="set-title">Home page</span><span class="set-desc">Where the Home button goes. Leave empty for the server default.</span></span>
+                <input type="url" class="set-input" data-setting="browsing.homeUrl" id="set-home-url" spellcheck="false" autocomplete="off" autocapitalize="off" />
+              </label>
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Block ads and trackers</span><span class="set-desc">Same switch as the shield button; applies to every device.</span></span>
+                <input type="checkbox" class="set-switch" id="set-adblock" />
+              </label>
+            </div>
+          </section>
+
+          <section class="set-section" id="set-stream">
+            <h3>Streaming</h3>
+            <div class="set-card">
+              <label class="set-row">
+                <span class="set-text"><span class="set-title">Picture quality</span><span class="set-desc">Lower is softer but faster on a slow connection. Try 45 on mobile data.</span></span>
+                <span class="set-range"><input type="range" min="20" max="95" step="5" data-setting="stream.quality" /><output data-output="stream.quality"></output></span>
+              </label>
+            </div>
+          </section>
+
+          <section class="set-section" id="set-about">
+            <h3>About</h3>
+            <div class="set-card">
+              <div class="set-row"><span class="set-text"><span class="set-title">Home IP</span><span class="set-desc">The address websites see.</span></span><strong id="about-ip">…</strong></div>
+              <div class="set-row"><span class="set-text"><span class="set-title">Server</span><span class="set-desc">Build and features of the Perch server.</span></span><strong id="about-server">…</strong></div>
+              <div class="set-row">
+                <span class="set-text"><span class="set-title">Reset settings</span><span class="set-desc">Back to defaults, including the background. Cookies, tabs and the ad blocker are untouched.</span></span>
+                <button type="button" class="set-btn set-btn-danger" id="settings-reset">Reset</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
 
       <footer class="statusbar" id="statusbar">
         <span class="status-left">
