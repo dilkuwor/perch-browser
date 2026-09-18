@@ -20,6 +20,7 @@ const COMMIT_FALLBACK_MS = 20_000;
 const NAVIGATE_REPLY_MS = 3_000;
 const META_POLL_MS = 1_000;
 const INPUT_QUEUE_MAX = 128;
+const EDITABLE_DEBOUNCE_MS = 120;
 // Adaptive streaming. When a viewer's link cannot keep up (frames have to be held back
 // and dropped), the stream steps down a ladder of cheaper encodings — first fewer
 // frames, then a smaller picture, and only then a lower JPEG quality, since blocky text
@@ -89,43 +90,159 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ].filter(Boolean);
 
-// Runs in the remote page: is the thing at (x, y) something you type into?
-// true / false, or null when it cannot be known (inside a cross-origin iframe).
-function editableAt(x, y) {
+// Runs in the remote page. Two questions about text fields, sharing one rule set:
+//   pageEditable("at", x, y, stash)  -> { editable: true | false | null, direct }
+//      Is the thing at (x, y) something you type into? null when it cannot be known
+//      (inside a cross-origin iframe). `direct` is true when the topmost element is the
+//      field itself. Sites often float a transparent element over a field (Google's
+//      search box), so the elements beneath the point count too — unless an open modal
+//      dialog sits above them, in which case a tap could never reach the field. A field
+//      found that way (not directly under the finger) is remembered on the document
+//      under `stash`, so the focus probe after the tap can hand it focus if the page
+//      itself focused nothing (see pageFocus).
+//   pageEditable("rects")     -> [[x, y, w, h], ...]
+//      Where the reachable text fields are, viewport-relative, so a phone can tell at
+//      once whether a tap landed in one (it must decide inside the tap's own event,
+//      long before a round trip could answer). Each box is checked at its centre with
+//      the same rule, so a field under a modal or an opaque overlay is left out.
+function pageEditable(op, x, y, stash) {
   const TEXT_INPUT = /^(?:text|search|email|url|tel|password|number|date|datetime-local|month|time|week|)$/i;
-  let doc = document;
-  let el = null;
-  let ox = 0;
-  let oy = 0;
-  for (let depth = 0; depth < 6; depth += 1) {
-    el = doc.elementFromPoint(x - ox, y - oy);
-    if (!el) return false;
-    while (el.shadowRoot) {
-      const inner = el.shadowRoot.elementFromPoint(x - ox, y - oy);
+  const EDITABLE = 'input,textarea,[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"],[role="textbox"],[role="searchbox"],[role="combobox"]';
+  const MODAL = 'dialog[open],[role="dialog"],[role="alertdialog"],[aria-modal="true"]';
+  // Controls that are not fields: a tap on one never means "type here".
+  const CONTROL = 'a,button,select,summary,[role="button"],[role="link"],[role="menuitem"],[role="tab"],[role="checkbox"],[role="radio"],[role="switch"]';
+  const targetOf = (el) => {
+    const label = el.closest("label");
+    return el.closest(EDITABLE) || (label && label.control) || null;
+  };
+  const usable = (target) => {
+    if (!target || target.disabled || target.readOnly) return false;
+    if (target.tagName === "INPUT") return TEXT_INPUT.test(target.getAttribute("type") || "");
+    return true;
+  };
+  // Many sites draw one wide "bar" (Google's search pill) around a narrow field and
+  // focus the field when the bar is tapped. The bar: the largest ancestor, within a few
+  // levels, that wraps exactly one usable field and is not much taller than it.
+  const barOf = (el) => {
+    let best = null;
+    let node = el;
+    for (let i = 0; i < 10 && node && node.nodeType === 1 && node !== node.ownerDocument.body; i += 1, node = node.parentElement) {
+      const fields = node.querySelectorAll(EDITABLE);
+      if (fields.length === 0) continue;
+      if (fields.length > 3) break;
+      const ok = Array.prototype.filter.call(fields, usable);
+      if (ok.length !== 1) break;
+      const f = ok[0];
+      const fr = f.getBoundingClientRect();
+      const nr = node.getBoundingClientRect();
+      if (fr.width < 2 || fr.height < 2) break;
+      if (nr.height > fr.height * 3 + 8) break;
+      best = { bar: node, field: f, rect: nr };
+    }
+    return best;
+  };
+  const deepest = (el, px, py) => {
+    while (el && el.shadowRoot) {
+      const inner = el.shadowRoot.elementFromPoint(px, py);
       if (!inner || inner === el) break;
       el = inner;
     }
-    if (el.tagName !== "IFRAME" && el.tagName !== "FRAME") break;
-    let inner = null;
-    try {
-      inner = el.contentDocument;
-    } catch {
-      // cross-origin
+    return el;
+  };
+  // What a tap at a point would reach, walking into same-origin iframes.
+  const at = (px, py) => {
+    let doc = document;
+    let ox = 0;
+    let oy = 0;
+    for (let depth = 0; depth < 6; depth += 1) {
+      const lx = px - ox;
+      const ly = py - oy;
+      const stack = doc.elementsFromPoint(lx, ly);
+      if (!stack.length) return { editable: false, direct: false, target: null };
+      const top = deepest(stack[0], lx, ly);
+      if (top.tagName === "IFRAME" || top.tagName === "FRAME") {
+        let inner = null;
+        try {
+          inner = top.contentDocument;
+        } catch {
+          // cross-origin
+        }
+        if (!inner) return { editable: null, direct: false, target: null };
+        const r = top.getBoundingClientRect();
+        ox += r.left + top.clientLeft;
+        oy += r.top + top.clientTop;
+        doc = inner;
+        continue;
+      }
+      const direct = targetOf(top);
+      if (direct) return { editable: usable(direct), direct: true, target: direct };
+      if (top.closest(CONTROL)) return { editable: false, direct: false, target: null };
+      // Look beneath the topmost element, but never through a modal dialog.
+      for (let i = 0; i < Math.min(stack.length, 12); i += 1) {
+        const el = i === 0 ? top : stack[i];
+        const target = targetOf(el);
+        if (target) return { editable: usable(target), direct: false, target };
+        if (el.matches(MODAL) || el.closest(MODAL)) return { editable: false, direct: false, target: null };
+      }
+      const bar = barOf(top);
+      if (bar) return { editable: true, direct: false, target: bar.field };
+      return { editable: false, direct: false, target: null };
     }
-    if (!inner) return null;
-    const r = el.getBoundingClientRect();
-    ox += r.left + el.clientLeft;
-    oy += r.top + el.clientTop;
-    doc = inner;
+    return { editable: false, direct: false, target: null };
+  };
+  if (op === "at") {
+    const r = at(x, y);
+    if (stash) {
+      const key = Symbol.for(stash);
+      const remembered = r.editable === true && !r.direct ? { target: r.target, at: Date.now() } : null;
+      Object.defineProperty(document, key, { value: remembered, configurable: true });
+    }
+    return { editable: r.editable, direct: r.direct };
   }
-  const label = el.closest("label");
-  const target =
-    el.closest('input,textarea,[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"],[role="textbox"],[role="searchbox"],[role="combobox"]') ||
-    (label && label.control);
-  if (!target) return false;
-  if (target.disabled || target.readOnly) return false;
-  if (target.tagName === "INPUT") return TEXT_INPUT.test(target.getAttribute("type") || "");
-  return true;
+  const MAX = 200;
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const out = [];
+  const collect = (doc, ox, oy, depth) => {
+    for (const el of doc.querySelectorAll(EDITABLE)) {
+      if (out.length >= MAX) return;
+      if (!usable(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      const bx = Math.max(0, r.left + ox);
+      const by = Math.max(0, r.top + oy);
+      const bw = Math.min(W, r.left + ox + r.width) - bx;
+      const bh = Math.min(H, r.top + oy + r.height) - by;
+      if (bw < 2 || bh < 2) continue;
+      // Reachable? The same rule a tap would be judged by, at the visible centre.
+      const hit = at(bx + bw / 2, by + bh / 2);
+      if (hit.editable !== true || hit.target !== el) continue;
+      // The whole bar around the field counts, as a tap anywhere on it would.
+      const bar = barOf(el);
+      const box = bar ? bar.rect : r;
+      const x1 = Math.max(0, box.left + ox);
+      const y1 = Math.max(0, box.top + oy);
+      const x2 = Math.min(W, box.left + ox + box.width);
+      const y2 = Math.min(H, box.top + oy + box.height);
+      if (x2 - x1 < 2 || y2 - y1 < 2) continue;
+      out.push([Math.round(x1), Math.round(y1), Math.round(x2 - x1), Math.round(y2 - y1)]);
+    }
+    if (depth >= 2) return;
+    for (const f of doc.querySelectorAll("iframe,frame")) {
+      let inner = null;
+      try {
+        inner = f.contentDocument;
+      } catch {
+        // cross-origin
+      }
+      if (!inner) continue;
+      const r = f.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      collect(inner, ox + r.left + f.clientLeft, oy + r.top + f.clientTop, depth + 1);
+    }
+  };
+  collect(document, 0, 0, 0);
+  return out;
 }
 
 // Runs in the remote page. Reports fullscreen changes through a CDP binding, which it
@@ -147,6 +264,32 @@ function hookFullscreen(name) {
   Object.defineProperty(document, key, { value: handler, configurable: true });
   document.addEventListener("fullscreenchange", handler, true);
   return Boolean(document.fullscreenElement);
+}
+
+// Runs in the remote page, shortly after a tap: is a text field focused now? If the
+// page focused nothing, but the tap landed on a bar around a single field (remembered
+// by pageEditable under `stash`), focus that field — what the user plainly meant.
+function pageFocus(stash) {
+  const editable = (el) => {
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === "INPUT") {
+      const t = String(el.type || "text").toLowerCase();
+      return !["button", "submit", "checkbox", "radio", "file", "range", "color", "image", "reset"].includes(t);
+    }
+    return tag === "TEXTAREA" || Boolean(el.isContentEditable);
+  };
+  const active = document.activeElement;
+  if (editable(active)) return true;
+  const st = stash ? document[Symbol.for(stash)] : null;
+  if (!st || !st.target || !st.target.isConnected || Date.now() - st.at > 2000) return false;
+  if (active && active !== document.body && active !== document.documentElement) return false;
+  try {
+    st.target.focus({ preventScroll: true });
+  } catch {
+    return false;
+  }
+  return editable(document.activeElement);
 }
 
 function userDataDir() {
@@ -514,8 +657,12 @@ class HomeBrowser {
     this._audio = {};
     this.remoteFullscreen = false;
     this._fsBinding = `__f${crypto.randomBytes(9).toString("hex")}`;
+    this._hitKey = `__h${crypto.randomBytes(9).toString("hex")}`;
     this._fsHooked = new WeakSet();
     this._adapt = { level: 0, calm: 0, timer: null, changedAt: 0 };
+    this._editableTimer = null;
+    this._lastEditable = "";
+    this._lastScroll = { x: -1, y: -1 };
     this.adblock = new AdBlocker({
       // Lives inside the Chrome profile so it shares its volume/persistence.
       dataDir: path.join(userDataDir(), "perch-adblock"),
@@ -1142,6 +1289,13 @@ class HomeBrowser {
     session.send("Page.screencastFrameAck", { sessionId: ev.sessionId }).catch(() => {});
     if (session !== this.paintCdp || this._viewers() === 0 || !ev.data) return;
     const meta = ev.metadata || {};
+    // The page scrolled: the text fields have moved on screen.
+    const sx = Number(meta.scrollOffsetX) || 0;
+    const sy = Number(meta.scrollOffsetY) || 0;
+    if (sx !== this._lastScroll.x || sy !== this._lastScroll.y) {
+      this._lastScroll = { x: sx, y: sy };
+      this._scheduleEditable();
+    }
     this._sendFrame(
       Buffer.from(ev.data, "base64"),
       this._frameEpoch(),
@@ -1244,6 +1398,7 @@ class HomeBrowser {
   // ——— meta (url/title) ———
 
   _scheduleMeta() {
+    this._scheduleEditable();
     if (this._metaTimer) return;
     this._metaTimer = setTimeout(() => {
       this._metaTimer = null;
@@ -1256,6 +1411,7 @@ class HomeBrowser {
     this._metaPoll = setInterval(() => {
       if (this.clients.size === 0 || !this.page) return;
       this._sendMeta(false).catch(() => {});
+      this._scheduleEditable();
     }, META_POLL_MS);
     this._metaPoll.unref();
   }
@@ -1299,6 +1455,50 @@ class HomeBrowser {
     if (force || changed) this.broadcast({ type: "meta", ...this.lastMeta });
     if (changed) this._scheduleTabs();
     return this.lastMeta;
+  }
+
+  // ——— text-field map (touch devices) ———
+
+  _wantEditable() {
+    for (const ws of this.clients) if (ws._editable && ws.readyState === 1) return true;
+    return false;
+  }
+
+  _scheduleEditable(ms = EDITABLE_DEBOUNCE_MS) {
+    if (this._editableTimer || !this._wantEditable()) return;
+    this._editableTimer = setTimeout(() => {
+      this._editableTimer = null;
+      this._pushEditable().catch(() => {});
+    }, ms);
+  }
+
+  async _pushEditable(only) {
+    const page = this.page;
+    if (!page || this._commitPending || !this._wantEditable()) return;
+    let rects = null;
+    try {
+      rects = await withTimeout(page.evaluate(pageEditable, "rects"), 500, null);
+    } catch {
+      rects = null;
+    }
+    if (!Array.isArray(rects)) return;
+    const payload = JSON.stringify({
+      type: "editable",
+      epoch: this.epoch,
+      w: this.viewport.width,
+      h: this.viewport.height,
+      rects,
+    });
+    if (!only && payload === this._lastEditable) return;
+    this._lastEditable = payload;
+    for (const ws of only ? [only] : this.clients) {
+      if (!ws._editable || ws.readyState !== 1) continue;
+      try {
+        ws.send(payload);
+      } catch {
+        // ignore
+      }
+    }
   }
 
   // ——— clients ———
@@ -1434,6 +1634,7 @@ class HomeBrowser {
     if (this._commitTimer) clearTimeout(this._commitTimer);
     this._commitTimer = null;
     this._snapshot();
+    this._scheduleEditable();
   }
 
   async _navigateTo(href) {
@@ -1524,6 +1725,7 @@ class HomeBrowser {
       .catch(() => {});
     await this._restartScreencast();
     this._snapshot();
+    this._scheduleEditable();
   }
 
   scalePoint(msg) {
@@ -1553,6 +1755,12 @@ class HomeBrowser {
     }
     if (msg.type === "visibility") {
       return this.setClientHidden(ws, msg.hidden === true);
+    }
+    if (msg.type === "editable") {
+      // A touch device asks for the text-field map; it gets the current one at once.
+      if (ws) ws._editable = msg.on === true;
+      if (ws && ws._editable && this.ready) return this._pushEditable(ws);
+      return Promise.resolve();
     }
     // A device sending input, resizing or asking for a picture is plainly on screen,
     // whatever its last visibility report said (a phone can miss the "visible" event).
@@ -1751,14 +1959,16 @@ class HomeBrowser {
   async _hitTest(ws, msg) {
     if (!this.page || !ws) return;
     const { x, y } = this.scalePoint(msg);
-    let editable = null;
+    let hit = null;
     try {
-      editable = await withTimeout(this.page.evaluate(editableAt, x, y), 400, null);
+      hit = await withTimeout(this.page.evaluate(pageEditable, "at", x, y, this._hitKey), 400, null);
     } catch {
-      editable = null;
+      hit = null;
     }
+    const editable = hit && typeof hit === "object" ? hit.editable : null;
+    const direct = Boolean(hit && typeof hit === "object" && hit.direct);
     try {
-      if (ws.readyState === 1) ws.send(JSON.stringify({ type: "hit", seq: msg.seq, editable }));
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: "hit", seq: msg.seq, editable, direct }));
     } catch {
       // ignore
     }
@@ -1768,20 +1978,7 @@ class HomeBrowser {
     if (!this.page || !ws) return;
     let editable = false;
     try {
-      editable = await withTimeout(
-        this.page.evaluate(() => {
-          const el = document.activeElement;
-          if (!el) return false;
-          const tag = el.tagName;
-          if (tag === "INPUT") {
-            const t = String(el.type || "text").toLowerCase();
-            return !["button", "submit", "checkbox", "radio", "file", "range", "color", "image", "reset"].includes(t);
-          }
-          return tag === "TEXTAREA" || Boolean(el.isContentEditable);
-        }),
-        1000,
-        false
-      );
+      editable = await withTimeout(this.page.evaluate(pageFocus, this._hitKey), 1000, false);
     } catch {
       editable = false;
     }
@@ -1810,6 +2007,10 @@ class HomeBrowser {
     if (this._tabsTimer) {
       clearTimeout(this._tabsTimer);
       this._tabsTimer = null;
+    }
+    if (this._editableTimer) {
+      clearTimeout(this._editableTimer);
+      this._editableTimer = null;
     }
     for (const ws of this.clients) {
       try {
@@ -1841,6 +2042,8 @@ module.exports = {
   buildUaOverride,
   adaptLevel,
   levelParams,
+  pageEditable,
+  pageFocus,
   useDevShm,
   ADAPT_LEVELS,
   FRAME_HEADER_BYTES,

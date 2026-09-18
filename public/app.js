@@ -108,6 +108,10 @@
     wheel: null,
     wheelFrame: 0,
     fallbackTimer: null,
+    editable: null, // { epoch, w, h, rects } — where the remote page's text fields are
+    lastHit: null,
+    kbdUnsure: false, // the keyboard was raised on a guess; a probe may take it down
+
     statFrames: 0,
     statBytes: 0,
     statAt: 0,
@@ -1753,6 +1757,7 @@
       sendResize(true);
       sendAudioPref();
       sendVisibility();
+      if (isTouchDevice) sendWs({ type: "editable", on: true });
       // Measure at once so the gauge needle settles without waiting for the 5 s tick.
       sendPing();
     });
@@ -1859,12 +1864,26 @@
         flashStatus(String(msg.text).slice(0, 160), 5000);
         return;
       }
+      if (msg.type === "editable") {
+        state.editable = msg;
+        return;
+      }
       if (msg.type === "hit") {
+        state.lastHit = msg;
         if (state.touch && state.touch.seq === msg.seq) state.touch.editable = msg.editable;
         return;
       }
       if (msg.type === "focus") {
-        if (msg.editable && document.activeElement !== kbd) focusKbd();
+        // Ground truth after the tap: what the remote page actually focused.
+        if (msg.editable) {
+          state.kbdUnsure = false;
+          if (document.activeElement !== kbd) focusKbd();
+        } else if (state.kbdUnsure && document.activeElement === kbd) {
+          // The keyboard went up on a guess (a field's box, or a field beneath an
+          // overlay) and the tap did not land in a field after all: take it down.
+          blurKbd();
+        }
+        return;
       }
     });
   }
@@ -2025,6 +2044,19 @@
 
   // ——— touch: one finger drags scroll, a still finger taps, a long press right-clicks ———
 
+  // Is this viewport point inside one of the remote page's text fields, according to the
+  // map the server last pushed? Only trusted for the page it was made for.
+  function inEditableBox(p) {
+    const map = state.editable;
+    if (!map || !Array.isArray(map.rects) || map.epoch < state.minEpoch) return false;
+    const kx = (map.w || state.frameW) / Math.max(1, p.vw);
+    const ky = (map.h || state.frameH) / Math.max(1, p.vh);
+    const x = p.x * kx;
+    const y = p.y * ky;
+    const slop = 4;
+    return map.rects.some(([rx, ry, rw, rh]) => x >= rx - slop && x <= rx + rw + slop && y >= ry - slop && y <= ry + rh + slop);
+  }
+
   function touchPoint(t) {
     return { clientX: t.clientX, clientY: t.clientY, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
   }
@@ -2054,6 +2086,7 @@
     state.touch = {
       seq: state.hitSeq,
       editable: undefined, // true | false | null (unknowable) once the server answers
+      guess: inEditableBox(hp), // known now, from the map the server pushed
       id: t.identifier,
       x: t.clientX,
       y: t.clientY,
@@ -2113,9 +2146,18 @@
     sendTap({ clientX: cur.x, clientY: cur.y }, 0);
     // Phones — iOS strictly — open the keyboard only if a field is focused *inside* the
     // tap's own event handler; focusing later, when a server reply arrives, is ignored.
-    // The hit-test sent at touchstart has normally answered by now, so act on it here.
-    if (cur.editable === true) focusKbd();
-    else if (cur.editable === false && document.activeElement === kbd) blurKbd();
+    // On a fast link the hit test sent at touchstart has answered by now; on a slow one
+    // (a round trip is longer than a tap) the map of text fields decides instead, and
+    // the server's probe of what really got focus corrects a wrong guess afterwards.
+    // The map wins even over a quick "no" from the hit test: a tap on a search bar's
+    // icon or padding usually focuses the field by the page's own script.
+    const hit = state.lastHit && state.lastHit.seq === cur.seq ? state.lastHit : null;
+    if (cur.editable === true || cur.guess) {
+      state.kbdUnsure = !(cur.editable === true && hit && hit.direct);
+      focusKbd();
+    } else if (cur.editable === false && document.activeElement === kbd) {
+      blurKbd();
+    }
     // Fallback and confirmation: a slow link (no answer yet), or a tap on something that
     // moves focus into a field by script. Works where late focus is allowed (Android).
     sendWs({ type: "probe" });
@@ -2244,6 +2286,7 @@
 
   function blurKbd() {
     state.kbdWanted = false;
+    state.kbdUnsure = false;
     if (document.activeElement === kbd) {
       kbd.blur();
       viewport.focus();

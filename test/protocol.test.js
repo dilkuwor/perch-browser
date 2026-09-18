@@ -329,3 +329,54 @@ describe("shared memory flag", () => {
     assert.equal(useDevShm({}, () => { throw new Error("no /dev/shm"); }), false);
   });
 });
+
+describe("text fields on touch devices", () => {
+  const { HomeBrowser } = require("../src/browser");
+
+  function socket() {
+    return { readyState: 1, bufferedAmount: 0, sent: [], send(p) { this.sent.push(JSON.parse(p)); } };
+  }
+
+  it("pushes the text-field map only to devices that asked, and at once when they ask", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const phone = socket();
+    const laptop = socket();
+    browser.clients.add(phone);
+    browser.clients.add(laptop);
+    browser.page = { evaluate: async () => [[10, 20, 100, 30]] };
+    browser.inputCdp = {};
+    browser.browser = {};
+    await browser.handleInput({ type: "editable", on: true }, phone);
+    assert.equal(phone.sent.length, 1);
+    assert.equal(phone.sent[0].type, "editable");
+    assert.deepEqual(phone.sent[0].rects, [[10, 20, 100, 30]]);
+    assert.equal(laptop.sent.length, 0, "a laptop never asked");
+    // Unchanged map: not sent again.
+    await browser._pushEditable();
+    assert.equal(phone.sent.length, 1);
+    // Changed map: pushed.
+    browser.page.evaluate = async () => [[10, 60, 100, 30]];
+    await browser._pushEditable();
+    assert.equal(phone.sent.length, 2);
+    assert.equal(phone.sent[1].rects[0][1], 60);
+    browser.adblock.stop();
+  });
+
+  it("answers a hit test with editability and whether the field was directly under the finger", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const phone = socket();
+    browser.page = { evaluate: async (fn, op) => (op === "at" ? { editable: true, direct: false } : null) };
+    await browser._hitTest(phone, { seq: 7, x: 1, y: 1, vw: 100, vh: 100 });
+    assert.deepEqual(phone.sent[0], { type: "hit", seq: 7, editable: true, direct: false });
+    browser.adblock.stop();
+  });
+
+  it("reports what the page focused after a tap", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const phone = socket();
+    browser.page = { evaluate: async () => true };
+    await browser._probeFocus(phone);
+    assert.deepEqual(phone.sent[0], { type: "focus", editable: true });
+    browser.adblock.stop();
+  });
+});
