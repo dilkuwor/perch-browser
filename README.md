@@ -255,12 +255,12 @@ The gear icon in the title bar opens the settings page (**Esc** or **Done** clos
 - **New tab page.** Pick the bundled wallpaper (one view in two versions — starry night in the dark theme, sunrise in the light theme), your own image, or none; set how much the image is dimmed; show or hide the search box and shortcuts. Uploads are resized (to at most 2560 × 1600) and converted to WebP in your browser first, so a 12-megapixel phone photo becomes a few hundred kilobytes. Any aspect ratio works: the image is cropped to fill the page on each screen.
 - **Security.** Change the sign-in password. You must enter the current one, and every other device is signed out at once. The new password is stored as a salted scrypt hash in `perch-auth/password.json` inside `CHROME_USER_DATA` and from then on **replaces `APP_PASSWORD`**, which is only the initial password. Forgot it? Delete that file and restart: `APP_PASSWORD` works again.
 - **Browsing.** Search engine (Google, DuckDuckGo, Bing, Brave, Startpage), the Home button's page (overrides `HOME_URL`), and the ad-blocker switch.
-- **Streaming.** Picture quality, applied live (overrides `JPEG_QUALITY`).
+- **Streaming.** Picture quality, applied live (overrides `JPEG_QUALITY`). This is the ceiling: on a link that cannot keep up, the server temporarily uses a lower quality and returns to your setting once it can.
 - **About.** Home IP, server build, and a reset button.
 
 ### Latency
 
-The speedometer icon in the title bar opens a panel with live connection stats: round-trip time to the home server, frames per second, bandwidth, and the remote viewport size. Its needle follows the round trip: right and green under ~80 ms, upright and amber under ~200 ms, left and red above — handy for telling an unresponsive site apart from a slow link.
+The speedometer icon in the title bar opens a panel with live connection stats: round-trip time to the home server, frames per second, bandwidth, the remote viewport size, and the picture quality in use (marked *auto* when the server has stepped it down for a slow link). Its needle follows the round trip: right and green under ~80 ms, upright and amber under ~200 ms, left and red above — handy for telling an unresponsive site apart from a slow link.
 
 ### Phones and tablets
 
@@ -277,8 +277,10 @@ Browsers only allow installation — and the service worker behind it — on **H
 
 ### Speed and caching
 
-- **Nothing is downloaded twice, nothing is ever stale.** Scripts, styles, icons and wallpapers are served under a hash of their content (`/app.js?v=3f9c…`) and cached permanently; the small page that names them is never cached. An update therefore appears on the very next load — no hard refresh, no clearing caches — while a repeat visit transfers a few kilobytes. Text is pre-compressed with Brotli (gzip as fallback).
-- **The service worker cannot pin you to an old version.** It stores only those hashed files, always fetches pages from the server, and never touches the API or the live stream. If the home server is unreachable it shows a plain "can't reach your Perch" page with a retry button.
+- **Opens from the cache, never stale.** Scripts, styles, icons and wallpapers are served under a hash of their content (`/app.js?v=3f9c…`) and cached permanently, and the page itself is kept by the service worker too, so a repeat visit paints in a few milliseconds instead of waiting for a TLS handshake and a round trip to the home server. The page is always re-fetched behind the scenes: when the server has a newer build, the cached copy is replaced and the open page reloads itself (while it is still starting up) or asks you to, so an update still arrives on the very next load. Text is pre-compressed with Brotli (gzip as fallback).
+- **The service worker never touches the API or the live stream.** If the home server is unreachable it shows a plain "can't reach your Perch" page with a retry button.
+- **A remembered device goes straight in.** A device that was signed in last time opens the app and starts the live connection at once, while the session is confirmed in the background, instead of showing the sign-in page for a round trip first. The server still has the final say: an expired session drops back to sign-in.
+- **The picture adapts to the link.** When a connection cannot keep up (frames have to be held back), the server steps the JPEG quality down in stages, up to 30 points below your setting, so more, smaller frames get through and scrolling stays fluid; it climbs back once the link has been calm for a few seconds. The Latency panel shows the quality in use.
 - **Slow links stay current instead of falling behind.** While a connection is still busy delivering a frame, the server holds only the newest one and drops the rest, so a phone on mobile data sees fewer frames rather than an ever-growing delay. On a fast link nothing is dropped.
 - The app opens as soon as your session is confirmed; the home IP (an outside lookup) fills in afterwards.
 

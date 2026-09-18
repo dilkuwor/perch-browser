@@ -20,6 +20,17 @@ const COMMIT_FALLBACK_MS = 20_000;
 const NAVIGATE_REPLY_MS = 3_000;
 const META_POLL_MS = 1_000;
 const INPUT_QUEUE_MAX = 128;
+// Adaptive picture quality: when a link cannot keep up (frames being held/dropped),
+// the JPEG quality steps down so more, smaller frames get through; it climbs back
+// once the link has been calm for a few seconds.
+const ADAPT_TICK_MS = 1000;
+const ADAPT_STEP = 10;
+const ADAPT_MAX_DROP = 30;
+const ADAPT_MIN_QUALITY = 20;
+const ADAPT_DOWN_RATIO = 0.3;
+const ADAPT_UP_RATIO = 0.05;
+const ADAPT_UP_CALM_TICKS = 4;
+const ADAPT_MIN_SAMPLE = 6;
 
 const crypto = require("crypto");
 const { AudioStreamer, AUDIO_FORMATS } = require("./audio");
@@ -399,6 +410,22 @@ function buildUaOverride(ua) {
   };
 }
 
+// One second of frame statistics in, the next effective quality out. Pure, so it can be
+// tested without Chromium. `target` is the user's setting; the result never goes above it
+// nor more than ADAPT_MAX_DROP below it.
+function adaptQuality({ target, current, offered, held, calm }) {
+  const floor = Math.max(ADAPT_MIN_QUALITY, target - ADAPT_MAX_DROP);
+  const ratio = offered > 0 ? held / offered : 0;
+  if (offered >= ADAPT_MIN_SAMPLE && ratio > ADAPT_DOWN_RATIO) {
+    return { quality: Math.max(floor, Math.min(current, target) - ADAPT_STEP), calm: 0 };
+  }
+  if (current >= target) return { quality: target, calm: 0 };
+  if (ratio > ADAPT_UP_RATIO) return { quality: current, calm: 0 };
+  const next = calm + 1;
+  if (next < ADAPT_UP_CALM_TICKS) return { quality: current, calm: next };
+  return { quality: Math.min(target, current + ADAPT_STEP), calm: 0 };
+}
+
 function isSessionGone(err) {
   return /closed|detached|disconnected/i.test((err && err.message) || "");
 }
@@ -445,6 +472,7 @@ class HomeBrowser {
     this.remoteFullscreen = false;
     this._fsBinding = `__f${crypto.randomBytes(9).toString("hex")}`;
     this._fsHooked = new WeakSet();
+    this._adapt = { quality: this.jpegQuality, calm: 0, offered: 0, held: 0, timer: null };
     this.adblock = new AdBlocker({
       // Lives inside the Chrome profile so it shares its volume/persistence.
       dataDir: path.join(userDataDir(), "perch-adblock"),
@@ -947,11 +975,12 @@ class HomeBrowser {
     try {
       await this.paintCdp.send("Page.startScreencast", {
         format: "jpeg",
-        quality: this.jpegQuality,
+        quality: this._adapt.quality,
         maxWidth: this.viewport.width,
         maxHeight: this.viewport.height,
         everyNthFrame: 1,
       });
+      this._startAdapt();
     } catch (err) {
       this._screencastOn = false;
       console.error(`[home-browser] startScreencast: ${err.message}`);
@@ -959,10 +988,52 @@ class HomeBrowser {
   }
 
   async _stopScreencast() {
+    this._stopAdapt();
     if (!this._screencastOn) return;
     this._screencastOn = false;
     if (!this.paintCdp) return;
     await withTimeout(this.paintCdp.send("Page.stopScreencast"), 2000, null).catch(() => {});
+  }
+
+  // ——— adaptive quality ———
+
+  _startAdapt() {
+    if (this._adapt.timer) return;
+    this._adapt.offered = 0;
+    this._adapt.held = 0;
+    this._adapt.timer = setInterval(() => this._adaptTick(), ADAPT_TICK_MS);
+    this._adapt.timer.unref();
+  }
+
+  _stopAdapt() {
+    if (this._adapt.timer) clearInterval(this._adapt.timer);
+    this._adapt.timer = null;
+  }
+
+  _adaptTick() {
+    const a = this._adapt;
+    const { quality, calm } = adaptQuality({
+      target: this.jpegQuality,
+      current: a.quality,
+      offered: a.offered,
+      held: a.held,
+      calm: a.calm,
+    });
+    a.offered = 0;
+    a.held = 0;
+    a.calm = calm;
+    if (quality !== a.quality) this._setQuality(quality);
+  }
+
+  _setQuality(quality) {
+    this._adapt.quality = quality;
+    this._adapt.calm = 0;
+    this.broadcast(this._streamInfo());
+    if (this._screencastOn) this._restartScreencast().catch(() => {});
+  }
+
+  _streamInfo() {
+    return { type: "stream", quality: this._adapt.quality, target: this.jpegQuality };
   }
 
   async _restartScreencast() {
@@ -993,7 +1064,7 @@ class HomeBrowser {
     const epoch = this._frameEpoch();
     try {
       const result = await withTimeout(
-        this.paintCdp.send("Page.captureScreenshot", { format: "jpeg", quality: this.jpegQuality }),
+        this.paintCdp.send("Page.captureScreenshot", { format: "jpeg", quality: this._adapt.quality }),
         5000,
         null
       );
@@ -1028,7 +1099,9 @@ class HomeBrowser {
   // socket drains. Fast links never hit this path.
   _offerFrame(ws, payload) {
     if (ws.readyState !== 1) return;
+    this._adapt.offered += 1;
     if (ws.bufferedAmount > Math.max(FRAME_BACKLOG_MIN, payload.length)) {
+      this._adapt.held += 1;
       ws._heldFrame = payload;
       this._armFrameDrain(ws);
       return;
@@ -1141,15 +1214,18 @@ class HomeBrowser {
     try {
       ws.send(JSON.stringify({ type: "meta", ...this.lastMeta }));
       ws.send(JSON.stringify({ type: "adblock", ...this.adblock.state(this.page) }));
+      ws.send(JSON.stringify(this._streamInfo()));
       if (this.remoteFullscreen) ws.send(JSON.stringify({ type: "fullscreen", on: true }));
     } catch {
       // ignore
     }
     this.ensure()
       .then(async () => {
-        await this._broadcastTabs(ws);
+        // The picture first: the tab list needs a title lookup in every background tab,
+        // which can take most of a second, and the view must not wait on it.
         await this._startScreencast();
         await this._snapshot(ws);
+        await this._broadcastTabs(ws);
       })
       .catch(() => {});
   }
@@ -1172,7 +1248,7 @@ class HomeBrowser {
     const q = clamp(Number(quality) || this.jpegQuality, 20, 100);
     if (q !== this.jpegQuality) {
       this.jpegQuality = q;
-      if (this._screencastOn) this._restartScreencast().catch(() => {});
+      this._setQuality(q);
     }
   }
 
@@ -1660,6 +1736,7 @@ module.exports = {
   keyEvents,
   virtualKey,
   buildUaOverride,
+  adaptQuality,
   FRAME_HEADER_BYTES,
   FRAME_TYPE,
 };

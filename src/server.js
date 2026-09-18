@@ -18,8 +18,9 @@ const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT) || 8080;
 const HOME_URL = process.env.HOME_URL || "https://www.google.com/";
 // Bumped whenever the server protocol changes; lets a client confirm it is not talking
-// to an older process. Audio landed in build 3. Tabs + binary screencast landed in build 2.
-const BUILD = 3;
+// to an older process. Adaptive quality + settings over the socket landed in build 4,
+// audio in build 3, tabs + binary screencast in build 2.
+const BUILD = 4;
 
 if (!APP_PASSWORD) {
   console.error("Refusing to start: APP_PASSWORD is missing.");
@@ -84,7 +85,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     status: "ok",
     build: BUILD,
-    features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", ...(browser.audioEnabled ? ["audio"] : [])],
+    features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", "adaptive-quality", ...(browser.audioEnabled ? ["audio"] : [])],
     chromium: browser.ready,
     audio: browser.audioEnabled ? (browser.audioActive ? "streaming" : "idle") : "disabled",
     user: APP_USER,
@@ -322,6 +323,13 @@ wss.on("connection", (ws, req, session) => {
   ws.sessionUser = session.user;
   ws.sessionToken = auth.tokenFromRequest(req);
   console.log(`[home-browser] ws connected (${clientIp(req)}, user=${session.user})`);
+  // Settings ride along on the socket, so a (re)connecting device is current at once
+  // without a separate round trip.
+  try {
+    ws.send(JSON.stringify({ type: "settings", ...settingsPayload() }));
+  } catch {
+    // ignore
+  }
   browser.addClient(ws);
 
   ws.on("pong", () => {

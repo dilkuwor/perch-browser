@@ -8,6 +8,7 @@ const {
   keyEvents,
   virtualKey,
   buildUaOverride,
+  adaptQuality,
   FRAME_HEADER_BYTES,
 } = require("../src/browser");
 
@@ -140,6 +141,86 @@ describe("frame backpressure", () => {
     ws.bufferedAmount = 0;
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(ws.sent.length, 0);
+    browser.adblock.stop();
+  });
+});
+
+describe("adaptive quality", () => {
+  it("steps down while a link keeps holding frames, but never below the floor", () => {
+    let q = { quality: 60, calm: 0 };
+    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 10, calm: q.calm });
+    assert.equal(q.quality, 50);
+    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 10, calm: q.calm });
+    assert.equal(q.quality, 40);
+    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 10, calm: q.calm });
+    assert.equal(q.quality, 30);
+    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 20, calm: q.calm });
+    assert.equal(q.quality, 30, "at most 30 points below the setting");
+    q = adaptQuality({ target: 30, current: 30, offered: 20, held: 20, calm: 0 });
+    assert.equal(q.quality, 20, "and never below 20");
+  });
+
+  it("ignores a handful of frames and a few held ones", () => {
+    assert.equal(adaptQuality({ target: 60, current: 60, offered: 3, held: 3, calm: 0 }).quality, 60);
+    assert.equal(adaptQuality({ target: 60, current: 60, offered: 40, held: 8, calm: 0 }).quality, 60);
+  });
+
+  it("climbs back only after the link has been calm for a few seconds", () => {
+    let q = { quality: 40, calm: 0 };
+    for (let i = 0; i < 3; i += 1) {
+      q = adaptQuality({ target: 60, current: q.quality, offered: 30, held: 0, calm: q.calm });
+      assert.equal(q.quality, 40, `tick ${i} stays put`);
+    }
+    q = adaptQuality({ target: 60, current: q.quality, offered: 30, held: 0, calm: q.calm });
+    assert.equal(q.quality, 50);
+    assert.equal(q.calm, 0);
+    // A busy second resets the count.
+    q = adaptQuality({ target: 60, current: 50, offered: 30, held: 3, calm: 3 });
+    assert.equal(q.quality, 50);
+    assert.equal(q.calm, 0);
+    // An idle page (no frames) still counts as calm.
+    q = adaptQuality({ target: 60, current: 50, offered: 0, held: 0, calm: 3 });
+    assert.equal(q.quality, 60);
+  });
+
+  it("snaps to a new setting", () => {
+    assert.equal(adaptQuality({ target: 45, current: 60, offered: 0, held: 0, calm: 0 }).quality, 45);
+    assert.equal(adaptQuality({ target: 45, current: 60, offered: 20, held: 10, calm: 0 }).quality, 35);
+  });
+});
+
+describe("client start-up", () => {
+  const { HomeBrowser } = require("../src/browser");
+
+  it("tells a new client the stream quality straight away", () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    browser.launch = async () => {};
+    const sent = [];
+    const ws = { readyState: 1, bufferedAmount: 0, send: (p) => sent.push(JSON.parse(p)) };
+    browser.addClient(ws);
+    const info = sent.find((m) => m.type === "stream");
+    assert.ok(info, "a stream message is sent");
+    assert.equal(info.quality, info.target);
+    browser.removeClient(ws);
+    browser.adblock.stop();
+  });
+
+  it("lowers and restores the quality from frame statistics", () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const sent = [];
+    browser.broadcast = (m) => sent.push(m);
+    browser._adapt.offered = 20;
+    browser._adapt.held = 12;
+    browser._adaptTick();
+    assert.equal(browser._adapt.quality, browser.jpegQuality - 10);
+    assert.equal(sent.at(-1).type, "stream");
+    assert.equal(sent.at(-1).quality, browser.jpegQuality - 10);
+    for (let i = 0; i < 4; i += 1) {
+      browser._adapt.offered = 20;
+      browser._adapt.held = 0;
+      browser._adaptTick();
+    }
+    assert.equal(browser._adapt.quality, browser.jpegQuality);
     browser.adblock.stop();
   });
 });

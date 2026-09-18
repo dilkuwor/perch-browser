@@ -13,6 +13,9 @@
         var t = localStorage.getItem("perch.theme") || "dark";
         if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
         document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+        // A device that was signed in last time opens straight into the app (app.js
+        // confirms the session in the background), with no flash of the sign-in page.
+        if (localStorage.getItem("perch.signedIn") === "1") document.documentElement.dataset.session = "remembered";
       } catch (e) {}
     })();
   </script>
@@ -194,6 +197,7 @@
               <div class="latency-row"><span>Frames</span><strong id="lat-fps">…</strong></div>
               <div class="latency-row"><span>Bandwidth</span><strong id="lat-bw">…</strong></div>
               <div class="latency-row"><span>Remote view</span><strong id="lat-size">…</strong></div>
+              <div class="latency-row"><span>Quality</span><strong id="lat-quality">…</strong></div>
               <div class="latency-row"><span>Sound</span><strong id="lat-audio">…</strong></div>
             </div>
           </div>

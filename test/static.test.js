@@ -178,11 +178,21 @@ describe("pwa", () => {
     assert.ok(second.body.toString().includes(assets.url("app.js")));
   });
 
-  it("keeps live traffic and pages out of the worker's cache", () => {
+  it("keeps live traffic out of the worker and never pins a page to an old build", () => {
     const src = assets.serviceWorker().body.toString();
     assert.match(src, /startsWith\("\/api\/"\)/);
     assert.match(src, /=== "\/ws"/);
     assert.match(src, /searchParams\.has\("v"\)/);
-    assert.ok(!/cache\.put\([^)]*"\/"/.test(src));
+    // The page is served from the cache for an instant open, but always re-fetched
+    // behind it, replaced when the server's copy differs, and the open page is told.
+    assert.match(src, /cache\.put\(PAGE, res\.clone\(\)\)/);
+    assert.match(src, /"perch-update"/);
+    assert.match(src, /etag/);
+    assert.ok(src.includes(`"v":"${assets.version()}"`) || src.includes(JSON.stringify(assets.version())));
+  });
+
+  it("puts the manifest on the credentialed connection", () => {
+    const html = request("/").res.body.toString();
+    assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest" crossorigin="use-credentials" \/>/);
   });
 });

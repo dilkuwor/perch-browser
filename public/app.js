@@ -24,6 +24,7 @@
   const latFps = document.getElementById("lat-fps");
   const latBw = document.getElementById("lat-bw");
   const latSize = document.getElementById("lat-size");
+  const latQuality = document.getElementById("lat-quality");
   const statusText = document.getElementById("status-text");
   const wsDot = document.getElementById("ws-dot");
   const ipChip = document.getElementById("ip-chip");
@@ -103,6 +104,7 @@
     hasCustomBg: false,
     searchUrl: "https://www.google.com/search?q=%s",
     rtt: null,
+    stream: null,
     statFrames: 0,
     statBytes: 0,
     statAt: 0,
@@ -751,6 +753,7 @@
     latFps.textContent = `${fps < 10 ? fps.toFixed(1) : Math.round(fps)} fps`;
     latBw.textContent = fmtBytes(bw);
     latSize.textContent = `${state.frameW} × ${state.frameH}`;
+    renderQuality();
     const pkts = Math.round(audio.packets / secs);
     audio.packets = 0;
     latAudio.textContent = !audio.format
@@ -765,6 +768,17 @@
       btnLatency.dataset.level = state.rtt < 80 ? "good" : state.rtt < 200 ? "fair" : "poor";
     }
     btnLatency.title = state.rtt == null ? "Latency" : `Latency: ${Math.round(state.rtt)} ms`;
+  }
+
+  // Picture quality actually in use. Below the setting means the server has stepped it
+  // down because this link could not keep up; it climbs back once the link is calm.
+  function renderQuality() {
+    const q = state.stream;
+    if (!q) {
+      latQuality.textContent = "…";
+      return;
+    }
+    latQuality.textContent = q.quality < q.target ? `${q.quality}% (auto, set ${q.target}%)` : `${q.quality}%`;
   }
 
   function sendPing() {
@@ -863,6 +877,7 @@
     setStatus(text);
     clearTimeout(state.statusTimer);
     state.statusTimer = setTimeout(() => {
+      state.statusTimer = null;
       if (state.live) setStatus(address.value || "");
     }, ms || 4000);
   }
@@ -903,7 +918,12 @@
   }
 
   function hideLoading() {
-    viewport.classList.remove("is-waiting");
+    if (viewport.classList.contains("is-waiting")) {
+      viewport.classList.remove("is-waiting");
+      // The first frame is what ends "Loading…" in the status bar, not the meta message
+      // (which usually arrives before the picture).
+      if (state.live && !state.statusTimer) setStatus(address.value || "");
+    }
     stream.classList.add("has-frame");
   }
 
@@ -961,7 +981,7 @@
   function decodeJpeg(bytes) {
     const blob = new Blob([bytes], { type: "image/jpeg" });
     if (typeof createImageBitmap === "function") {
-      return createImageBitmap(blob);
+      return createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
     }
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(blob);
@@ -1335,17 +1355,52 @@
     return body;
   }
 
-  // The app opens as soon as the session is confirmed; the home IP (an outside lookup
-  // that can take seconds) is filled in afterwards by refreshIp().
+  // Whether this device was signed in last time. It only decides what is shown first:
+  // a remembered device opens straight into the app and starts the live connection
+  // while the session is confirmed in the background, instead of waiting a round trip
+  // (and painting the sign-in page) first. The server still has the final say.
+  const SIGNED_IN_KEY = "perch.signedIn";
+
+  function rememberSignedIn(on) {
+    try {
+      if (on) localStorage.setItem(SIGNED_IN_KEY, "1");
+      else localStorage.removeItem(SIGNED_IN_KEY);
+    } catch {
+      // ignore
+    }
+    if (on) document.documentElement.dataset.session = "remembered";
+    else delete document.documentElement.dataset.session;
+  }
+
+  function wasSignedIn() {
+    try {
+      return localStorage.getItem(SIGNED_IN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  // The app opens as soon as the session is confirmed — at once on a remembered device;
+  // the home IP (an outside lookup that can take seconds) is filled in afterwards.
   async function checkSession() {
+    const remembered = wasSignedIn();
+    if (remembered) enterApp();
     try {
       await api("/api/session");
-      enterApp();
+      if (!remembered) enterApp();
+      rememberSignedIn(true);
     } catch (err) {
-      if (err.status !== 404) return showLogin();
+      if (err.status === 401 || err.status === 403) return showLogin();
+      if (err.status !== 404) {
+        // Server unreachable: a remembered device stays in the app and keeps trying to
+        // connect (the status dot shows it); anyone else gets the sign-in page.
+        if (!remembered) showLogin();
+        return;
+      }
       // A server from before /api/session existed.
       try {
         enterApp((await api("/api/ip")).egress_ip);
+        rememberSignedIn(true);
       } catch {
         showLogin();
       }
@@ -1353,6 +1408,7 @@
   }
 
   function showLogin() {
+    rememberSignedIn(false);
     loginScreen.hidden = false;
     appScreen.hidden = true;
     closeSocket();
@@ -1365,7 +1421,7 @@
     if (egressIp) ipChip.textContent = `IP · ${egressIp}`;
     setLive(false);
     seedTabs();
-    connectSocket();
+    ensureSocket();
     loadSettings();
     refreshIp();
     refreshTabs();
@@ -1396,6 +1452,7 @@
         body: JSON.stringify({ password: passwordInput.value }),
       });
       passwordInput.value = "";
+      rememberSignedIn(true);
       enterApp();
     } catch (err) {
       showError(err.status === 429
@@ -1633,6 +1690,14 @@
     wsDot.classList.remove("on");
   }
 
+  // Connect only if there is no live or pending connection (the speculative one opened
+  // at start-up, or one that is already reconnecting).
+  function ensureSocket() {
+    const ws = state.ws;
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+    connectSocket();
+  }
+
   function connectSocket() {
     closeSocket();
     const gen = state.wsGen;
@@ -1717,6 +1782,11 @@
       }
       if (msg.type === "fullscreen") {
         mirrorRemoteFullscreen(msg.on === true);
+        return;
+      }
+      if (msg.type === "stream") {
+        state.stream = { quality: Number(msg.quality) || 0, target: Number(msg.target) || 0 };
+        if (!latencyPanel.hidden) renderQuality();
         return;
       }
       if (msg.type === "pong") {
@@ -2203,6 +2273,23 @@
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
+    });
+    // The page opens from the worker's cache and is re-fetched behind it. When the
+    // server has a newer build, this message arrives: reload while still starting up
+    // (nothing is lost yet), otherwise leave it to the user.
+    let updateNoted = false;
+    navigator.serviceWorker.addEventListener("message", (ev) => {
+      const msg = ev.data || {};
+      if (msg.type !== "perch-update") return;
+      const mine = window.__PERCH && window.__PERCH.v;
+      if (msg.version && mine && msg.version === mine) return;
+      if (performance.now() < 15000) {
+        location.reload();
+        return;
+      }
+      if (updateNoted) return;
+      updateNoted = true;
+      flashStatus("Perch was updated — reload the page to get the new version", 10000);
     });
   }
 })();

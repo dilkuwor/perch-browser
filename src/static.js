@@ -31,6 +31,8 @@ const COMPRESSIBLE = new Set([".html", ".js", ".css", ".svg", ".json", ".webmani
 const IMMUTABLE = "public, max-age=31536000, immutable";
 // The service worker pre-fetches these so a second visit paints without the network.
 const SHELL = ["styles.css", "app.js", "icons/icon-192.png"];
+// The page itself is cached too (see serviceWorker()); this is its key in the cache.
+const PAGE = "/";
 
 const THEME_COLOR = "#07080b";
 
@@ -157,7 +159,7 @@ class StaticAssets {
         all.filter((f) => f.startsWith("img/")).map((rel) => [rel, this.asset(rel).hash])
       );
       const head = [
-        `<link rel="manifest" href="/manifest.webmanifest" />`,
+        `<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />`,
         `<link rel="apple-touch-icon" href="${this.url("icons/apple-touch-icon.png")}" />`,
         `<meta name="mobile-web-app-capable" content="yes" />`,
         `<meta name="apple-mobile-web-app-capable" content="yes" />`,
@@ -199,20 +201,56 @@ class StaticAssets {
     });
   }
 
-  // The worker only ever caches versioned URLs, which cannot go stale, and always asks
-  // the network for pages — so it speeds up repeat visits without the classic
-  // "stuck on an old version" failure. Live traffic (/api, /ws) never touches it.
+  // Repeat visits open from the cache: versioned assets (which cannot go stale) and the
+  // page itself. Nobody can be pinned to an old version, because the page is always
+  // re-fetched in the background: when the server's copy differs, the cache is replaced
+  // and the open page is told, and it reloads itself (at once while it is still starting,
+  // otherwise it asks). A new worker does the same on activation. Live traffic (/api,
+  // /ws) never touches the worker.
   serviceWorker() {
     return this._memo("sw", this._list(), () => {
       const source = `"use strict";
 const VERSION = ${JSON.stringify(this.version())};
 const CACHE = "perch-" + VERSION;
 const SHELL = ${JSON.stringify(SHELL.map((rel) => this.url(rel)))};
+const PAGE = ${JSON.stringify(PAGE)};
 const OFFLINE = ${JSON.stringify(OFFLINE_PAGE)};
+
+function isPage(res) {
+  return res && res.ok && /text\\/html/.test(res.headers.get("content-type") || "");
+}
+
+async function pageVersion(res) {
+  try {
+    const m = /__PERCH=\\{"v":"([0-9a-f]+)"/.exec(await res.clone().text());
+    return m ? m[1] : "";
+  } catch {
+    return "";
+  }
+}
+
+async function tellClients(version) {
+  const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  for (const c of all) c.postMessage({ type: "perch-update", version });
+}
+
+// Fetch the page from the server; when it differs from the cached copy, replace it and
+// tell open pages. Returns the network response (or throws) so a caller can also use it.
+async function refreshPage(req, cache, cached) {
+  const res = await fetch(req);
+  if (!isPage(res)) return res;
+  const prev = cached && cached.headers.get("etag");
+  if (prev && prev === res.headers.get("etag")) return res;
+  await cache.put(PAGE, res.clone());
+  if (cached) tellClients(await pageVersion(res));
+  return res;
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => Promise.allSettled(SHELL.map((url) => cache.add(url)))).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      .then((cache) => Promise.allSettled([...SHELL, new Request(PAGE, { cache: "reload" })].map((url) => cache.add(url))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -221,6 +259,7 @@ self.addEventListener("activate", (event) => {
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => k.startsWith("perch-") && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+      .then(() => tellClients(VERSION))
   );
 });
 
@@ -232,8 +271,21 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || url.pathname === "/ws" || url.pathname === "/health") return;
 
   if (req.mode === "navigate") {
+    const offline = () => new Response(OFFLINE, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (url.pathname !== PAGE && url.pathname !== "/index.html") {
+      event.respondWith(fetch(req).catch(offline));
+      return;
+    }
     event.respondWith(
-      fetch(req).catch(() => new Response(OFFLINE, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }))
+      caches.open(CACHE).then(async (cache) => {
+        const cached = await cache.match(PAGE);
+        const refresh = refreshPage(req, cache, cached);
+        if (cached) {
+          event.waitUntil(refresh.catch(() => {}));
+          return cached;
+        }
+        return refresh.catch(offline);
+      })
     );
     return;
   }

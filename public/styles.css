@@ -164,7 +164,8 @@ input {
   background: radial-gradient(1300px 980px at 50% 42%, transparent 60%, rgba(2, 4, 12, 0.55));
 }
 
-.login-screen[hidden] {
+.login-screen[hidden],
+html[data-session="remembered"] .login-screen {
   display: none;
 }
 
