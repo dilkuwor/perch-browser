@@ -20,17 +20,48 @@ const COMMIT_FALLBACK_MS = 20_000;
 const NAVIGATE_REPLY_MS = 3_000;
 const META_POLL_MS = 1_000;
 const INPUT_QUEUE_MAX = 128;
-// Adaptive picture quality: when a link cannot keep up (frames being held/dropped),
-// the JPEG quality steps down so more, smaller frames get through; it climbs back
-// once the link has been calm for a few seconds.
+// Adaptive streaming. When a viewer's link cannot keep up (frames have to be held back
+// and dropped), the stream steps down a ladder of cheaper encodings — first fewer
+// frames, then a smaller picture, and only then a lower JPEG quality, since blocky text
+// hurts more than a softer one — and climbs back once the link has been calm for a few
+// seconds. Every step restarts Chromium's screencast, which costs a gap and a full
+// frame, so steps are spaced at least ADAPT_RESTART_MIN_MS apart. The signal is the
+// worst *watching* viewer of the last second, never a sum across devices.
 const ADAPT_TICK_MS = 1000;
-const ADAPT_STEP = 10;
-const ADAPT_MAX_DROP = 30;
-const ADAPT_MIN_QUALITY = 20;
 const ADAPT_DOWN_RATIO = 0.3;
 const ADAPT_UP_RATIO = 0.05;
 const ADAPT_UP_CALM_TICKS = 4;
 const ADAPT_MIN_SAMPLE = 6;
+const ADAPT_RESTART_MIN_MS = 3000;
+const ADAPT_MIN_QUALITY = 20;
+// Level 0 is the user's own setting. `nth` = every Nth compositor frame is encoded,
+// `scale` shrinks the encoded picture (the page layout is untouched), `dq` lowers quality.
+const ADAPT_LEVELS = [
+  { nth: 1, scale: 1, dq: 0 },
+  { nth: 2, scale: 1, dq: 0 },
+  { nth: 2, scale: 0.75, dq: 0 },
+  { nth: 3, scale: 0.75, dq: 10 },
+  { nth: 3, scale: 0.6, dq: 20 },
+];
+
+// --disable-dev-shm-usage moves Chromium's shared memory from /dev/shm to disk-backed
+// temp files. That is the right call under Docker's 64 MB default (Chromium crashes when
+// it fills up) and the wrong one when the container was given real room — compose and
+// the documented `docker run` both pass 1 GB — because RAM is much faster. So decide by
+// looking. CHROME_DEV_SHM=1/0 forces it either way.
+const DEV_SHM_MIN_BYTES = 512 * 1024 * 1024;
+
+function useDevShm(env = process.env, statfs = fs.statfsSync) {
+  if (env.CHROME_DEV_SHM === "1") return true;
+  if (env.CHROME_DEV_SHM === "0") return false;
+  if (process.platform !== "linux") return true; // the flag only means something on Linux
+  try {
+    const s = statfs("/dev/shm");
+    return Number(s.bsize) * Number(s.blocks) >= DEV_SHM_MIN_BYTES;
+  } catch {
+    return false;
+  }
+}
 
 const crypto = require("crypto");
 const { AudioStreamer, AUDIO_FORMATS } = require("./audio");
@@ -410,20 +441,32 @@ function buildUaOverride(ua) {
   };
 }
 
-// One second of frame statistics in, the next effective quality out. Pure, so it can be
-// tested without Chromium. `target` is the user's setting; the result never goes above it
-// nor more than ADAPT_MAX_DROP below it.
-function adaptQuality({ target, current, offered, held, calm }) {
-  const floor = Math.max(ADAPT_MIN_QUALITY, target - ADAPT_MAX_DROP);
-  const ratio = offered > 0 ? held / offered : 0;
+// One second of frame statistics in, the next ladder level out. Pure, so it can be
+// tested without Chromium. `ratio` is held/offered for the worst watching viewer.
+function adaptLevel({ level, offered, ratio, calm }) {
+  const top = ADAPT_LEVELS.length - 1;
   if (offered >= ADAPT_MIN_SAMPLE && ratio > ADAPT_DOWN_RATIO) {
-    return { quality: Math.max(floor, Math.min(current, target) - ADAPT_STEP), calm: 0 };
+    return { level: Math.min(top, level + 1), calm: 0 };
   }
-  if (current >= target) return { quality: target, calm: 0 };
-  if (ratio > ADAPT_UP_RATIO) return { quality: current, calm: 0 };
+  if (level === 0) return { level: 0, calm: 0 };
+  if (ratio > ADAPT_UP_RATIO) return { level, calm: 0 };
   const next = calm + 1;
-  if (next < ADAPT_UP_CALM_TICKS) return { quality: current, calm: next };
-  return { quality: Math.min(target, current + ADAPT_STEP), calm: 0 };
+  if (next < ADAPT_UP_CALM_TICKS) return { level, calm: next };
+  return { level: level - 1, calm: 0 };
+}
+
+// The screencast parameters for a ladder level, given the user's quality setting and
+// the remote viewport.
+function levelParams(level, target, viewport) {
+  const l = ADAPT_LEVELS[clamp(level, 0, ADAPT_LEVELS.length - 1)];
+  return {
+    level: clamp(level, 0, ADAPT_LEVELS.length - 1),
+    quality: Math.max(ADAPT_MIN_QUALITY, target - l.dq),
+    everyNthFrame: l.nth,
+    scale: l.scale,
+    maxWidth: Math.max(1, Math.round(viewport.width * l.scale)),
+    maxHeight: Math.max(1, Math.round(viewport.height * l.scale)),
+  };
 }
 
 function isSessionGone(err) {
@@ -472,7 +515,7 @@ class HomeBrowser {
     this.remoteFullscreen = false;
     this._fsBinding = `__f${crypto.randomBytes(9).toString("hex")}`;
     this._fsHooked = new WeakSet();
-    this._adapt = { quality: this.jpegQuality, calm: 0, offered: 0, held: 0, timer: null };
+    this._adapt = { level: 0, calm: 0, timer: null, changedAt: 0 };
     this.adblock = new AdBlocker({
       // Lives inside the Chrome profile so it shares its volume/persistence.
       dataDir: path.join(userDataDir(), "perch-adblock"),
@@ -510,7 +553,7 @@ class HomeBrowser {
       const winW = this.headed ? MAX_VIEW_W : this.viewport.width;
       const winH = this.headed ? MAX_VIEW_H : this.viewport.height;
       const args = [
-        "--disable-dev-shm-usage",
+        ...(useDevShm() ? [] : ["--disable-dev-shm-usage"]),
         `--window-size=${winW},${winH}`,
         "--window-position=0,0",
         "--no-first-run",
@@ -970,15 +1013,16 @@ class HomeBrowser {
   // ——— frames ———
 
   async _startScreencast() {
-    if (!this.paintCdp || this._screencastOn || this.clients.size === 0) return;
+    if (!this.paintCdp || this._screencastOn || this._viewers() === 0) return;
     this._screencastOn = true;
     try {
+      const p = this._streamParams();
       await this.paintCdp.send("Page.startScreencast", {
         format: "jpeg",
-        quality: this._adapt.quality,
-        maxWidth: this.viewport.width,
-        maxHeight: this.viewport.height,
-        everyNthFrame: 1,
+        quality: p.quality,
+        maxWidth: p.maxWidth,
+        maxHeight: p.maxHeight,
+        everyNthFrame: p.everyNthFrame,
       });
       this._startAdapt();
     } catch (err) {
@@ -995,12 +1039,16 @@ class HomeBrowser {
     await withTimeout(this.paintCdp.send("Page.stopScreencast"), 2000, null).catch(() => {});
   }
 
-  // ——— adaptive quality ———
+  async _restartScreencast() {
+    await this._stopScreencast();
+    await this._startScreencast();
+  }
+
+  // ——— adaptive streaming ———
 
   _startAdapt() {
     if (this._adapt.timer) return;
-    this._adapt.offered = 0;
-    this._adapt.held = 0;
+    for (const ws of this.clients) ws._stat = { offered: 0, held: 0 };
     this._adapt.timer = setInterval(() => this._adaptTick(), ADAPT_TICK_MS);
     this._adapt.timer.unref();
   }
@@ -1010,35 +1058,80 @@ class HomeBrowser {
     this._adapt.timer = null;
   }
 
+  // The worst watching viewer of the last second decides; then the counters reset.
   _adaptTick() {
+    let offered = 0;
+    let ratio = 0;
+    for (const ws of this.clients) {
+      const st = ws._stat;
+      if (!st) continue;
+      if (!ws._hidden && st.offered >= ADAPT_MIN_SAMPLE) {
+        const r = st.held / st.offered;
+        if (r > ratio || offered === 0) {
+          ratio = Math.max(ratio, r);
+          offered = Math.max(offered, st.offered);
+        }
+      }
+      st.offered = 0;
+      st.held = 0;
+    }
     const a = this._adapt;
-    const { quality, calm } = adaptQuality({
-      target: this.jpegQuality,
-      current: a.quality,
-      offered: a.offered,
-      held: a.held,
-      calm: a.calm,
-    });
-    a.offered = 0;
-    a.held = 0;
+    const { level, calm } = adaptLevel({ level: a.level, offered, ratio, calm: a.calm });
     a.calm = calm;
-    if (quality !== a.quality) this._setQuality(quality);
+    if (level === a.level) return;
+    // Each step restarts the screencast (a gap and a full frame): never in quick succession.
+    if (Date.now() - a.changedAt < ADAPT_RESTART_MIN_MS) return;
+    this._setLevel(level);
   }
 
-  _setQuality(quality) {
-    this._adapt.quality = quality;
+  _setLevel(level) {
+    this._adapt.level = level;
     this._adapt.calm = 0;
+    this._adapt.changedAt = Date.now();
     this.broadcast(this._streamInfo());
     if (this._screencastOn) this._restartScreencast().catch(() => {});
   }
 
-  _streamInfo() {
-    return { type: "stream", quality: this._adapt.quality, target: this.jpegQuality };
+  _streamParams() {
+    return levelParams(this._adapt.level, this.jpegQuality, this.viewport);
   }
 
-  async _restartScreencast() {
-    await this._stopScreencast();
+  _streamInfo() {
+    const p = this._streamParams();
+    return {
+      type: "stream",
+      quality: p.quality,
+      target: this.jpegQuality,
+      level: p.level,
+      everyNthFrame: p.everyNthFrame,
+      scale: p.scale,
+    };
+  }
+
+  // ——— viewers ———
+
+  // Clients that are actually looking. A phone with Perch in the background, or a laptop
+  // on another browser tab, is connected but not watching: it gets no frames, and when
+  // nobody is watching the screencast stops, so the home server stops encoding too.
+  // Sound is separate and keeps playing — music in a background tab is the point.
+  _viewers() {
+    let n = 0;
+    for (const ws of this.clients) if (!ws._hidden) n += 1;
+    return n;
+  }
+
+  async setClientHidden(ws, hidden) {
+    if (Boolean(ws._hidden) === hidden) return;
+    ws._hidden = hidden;
+    ws._heldFrame = null;
+    if (hidden) {
+      if (this._viewers() === 0) await this._stopScreencast();
+      return;
+    }
+    if (!this.ready) return;
     await this._startScreencast();
+    // The screencast only emits on change; show the returning viewer the current page now.
+    await this._snapshot(ws);
   }
 
   _frameEpoch() {
@@ -1047,7 +1140,7 @@ class HomeBrowser {
 
   _onScreencastFrame(session, ev) {
     session.send("Page.screencastFrameAck", { sessionId: ev.sessionId }).catch(() => {});
-    if (session !== this.paintCdp || this.clients.size === 0 || !ev.data) return;
+    if (session !== this.paintCdp || this._viewers() === 0 || !ev.data) return;
     const meta = ev.metadata || {};
     this._sendFrame(
       Buffer.from(ev.data, "base64"),
@@ -1064,7 +1157,7 @@ class HomeBrowser {
     const epoch = this._frameEpoch();
     try {
       const result = await withTimeout(
-        this.paintCdp.send("Page.captureScreenshot", { format: "jpeg", quality: this._adapt.quality }),
+        this.paintCdp.send("Page.captureScreenshot", { format: "jpeg", quality: this._streamParams().quality }),
         5000,
         null
       );
@@ -1082,7 +1175,7 @@ class HomeBrowser {
   }
 
   _sendFrame(jpeg, epoch, width, height, only) {
-    if (!jpeg || this.clients.size === 0) return;
+    if (!jpeg || this._viewers() === 0) return;
     if (!this._frameLogged) {
       this._frameLogged = true;
       console.log("[home-browser] streaming frames");
@@ -1098,10 +1191,11 @@ class HomeBrowser {
   // socket is still busy, only the newest frame is kept, and it goes out the moment the
   // socket drains. Fast links never hit this path.
   _offerFrame(ws, payload) {
-    if (ws.readyState !== 1) return;
-    this._adapt.offered += 1;
+    if (ws.readyState !== 1 || ws._hidden) return;
+    const st = ws._stat || (ws._stat = { offered: 0, held: 0 });
+    st.offered += 1;
     if (ws.bufferedAmount > Math.max(FRAME_BACKLOG_MIN, payload.length)) {
-      this._adapt.held += 1;
+      st.held += 1;
       ws._heldFrame = payload;
       this._armFrameDrain(ws);
       return;
@@ -1235,7 +1329,7 @@ class HomeBrowser {
     clearInterval(ws._frameDrain);
     ws._frameDrain = null;
     ws._heldFrame = null;
-    if (this.clients.size === 0) this._stopScreencast().catch(() => {});
+    if (this._viewers() === 0) this._stopScreencast().catch(() => {});
     this._syncAudio();
   }
 
@@ -1248,7 +1342,8 @@ class HomeBrowser {
     const q = clamp(Number(quality) || this.jpegQuality, 20, 100);
     if (q !== this.jpegQuality) {
       this.jpegQuality = q;
-      this._setQuality(q);
+      this.broadcast(this._streamInfo());
+      if (this._screencastOn) this._restartScreencast().catch(() => {});
     }
   }
 
@@ -1455,6 +1550,14 @@ class HomeBrowser {
     }
     if (msg.type === "exitFullscreen") {
       return this.exitRemoteFullscreen();
+    }
+    if (msg.type === "visibility") {
+      return this.setClientHidden(ws, msg.hidden === true);
+    }
+    // A device sending input, resizing or asking for a picture is plainly on screen,
+    // whatever its last visibility report said (a phone can miss the "visible" event).
+    if (ws && ws._hidden && msg.type !== "audio" && msg.type !== "adblock") {
+      this.setClientHidden(ws, false).catch(() => {});
     }
     if (msg.type === "resize") {
       if (!this.ready) return Promise.resolve();
@@ -1736,7 +1839,10 @@ module.exports = {
   keyEvents,
   virtualKey,
   buildUaOverride,
-  adaptQuality,
+  adaptLevel,
+  levelParams,
+  useDevShm,
+  ADAPT_LEVELS,
   FRAME_HEADER_BYTES,
   FRAME_TYPE,
 };

@@ -8,7 +8,10 @@ const {
   keyEvents,
   virtualKey,
   buildUaOverride,
-  adaptQuality,
+  adaptLevel,
+  levelParams,
+  useDevShm,
+  ADAPT_LEVELS,
   FRAME_HEADER_BYTES,
 } = require("../src/browser");
 
@@ -145,82 +148,184 @@ describe("frame backpressure", () => {
   });
 });
 
-describe("adaptive quality", () => {
-  it("steps down while a link keeps holding frames, but never below the floor", () => {
-    let q = { quality: 60, calm: 0 };
-    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 10, calm: q.calm });
-    assert.equal(q.quality, 50);
-    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 10, calm: q.calm });
-    assert.equal(q.quality, 40);
-    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 10, calm: q.calm });
-    assert.equal(q.quality, 30);
-    q = adaptQuality({ target: 60, current: q.quality, offered: 20, held: 20, calm: q.calm });
-    assert.equal(q.quality, 30, "at most 30 points below the setting");
-    q = adaptQuality({ target: 30, current: 30, offered: 20, held: 20, calm: 0 });
-    assert.equal(q.quality, 20, "and never below 20");
+describe("adaptive streaming ladder", () => {
+  const top = ADAPT_LEVELS.length - 1;
+
+  it("steps down one level at a time while a viewer keeps holding frames, and stops at the top", () => {
+    let q = { level: 0, calm: 0 };
+    for (let i = 1; i <= top + 2; i += 1) {
+      q = adaptLevel({ level: q.level, offered: 20, ratio: 0.5, calm: q.calm });
+      assert.equal(q.level, Math.min(i, top));
+    }
   });
 
   it("ignores a handful of frames and a few held ones", () => {
-    assert.equal(adaptQuality({ target: 60, current: 60, offered: 3, held: 3, calm: 0 }).quality, 60);
-    assert.equal(adaptQuality({ target: 60, current: 60, offered: 40, held: 8, calm: 0 }).quality, 60);
+    assert.equal(adaptLevel({ level: 0, offered: 3, ratio: 1, calm: 0 }).level, 0);
+    assert.equal(adaptLevel({ level: 0, offered: 40, ratio: 0.2, calm: 0 }).level, 0);
   });
 
   it("climbs back only after the link has been calm for a few seconds", () => {
-    let q = { quality: 40, calm: 0 };
+    let q = { level: 2, calm: 0 };
     for (let i = 0; i < 3; i += 1) {
-      q = adaptQuality({ target: 60, current: q.quality, offered: 30, held: 0, calm: q.calm });
-      assert.equal(q.quality, 40, `tick ${i} stays put`);
+      q = adaptLevel({ level: q.level, offered: 30, ratio: 0, calm: q.calm });
+      assert.equal(q.level, 2, `tick ${i} stays put`);
     }
-    q = adaptQuality({ target: 60, current: q.quality, offered: 30, held: 0, calm: q.calm });
-    assert.equal(q.quality, 50);
+    q = adaptLevel({ level: q.level, offered: 30, ratio: 0, calm: q.calm });
+    assert.equal(q.level, 1);
     assert.equal(q.calm, 0);
     // A busy second resets the count.
-    q = adaptQuality({ target: 60, current: 50, offered: 30, held: 3, calm: 3 });
-    assert.equal(q.quality, 50);
-    assert.equal(q.calm, 0);
+    q = adaptLevel({ level: 1, offered: 30, ratio: 0.1, calm: 3 });
+    assert.deepEqual(q, { level: 1, calm: 0 });
     // An idle page (no frames) still counts as calm.
-    q = adaptQuality({ target: 60, current: 50, offered: 0, held: 0, calm: 3 });
-    assert.equal(q.quality, 60);
+    q = adaptLevel({ level: 1, offered: 0, ratio: 0, calm: 3 });
+    assert.equal(q.level, 0);
   });
 
-  it("snaps to a new setting", () => {
-    assert.equal(adaptQuality({ target: 45, current: 60, offered: 0, held: 0, calm: 0 }).quality, 45);
-    assert.equal(adaptQuality({ target: 45, current: 60, offered: 20, held: 10, calm: 0 }).quality, 35);
+  it("prefers fewer frames and a smaller picture over a lower quality", () => {
+    const vp = { width: 1200, height: 800 };
+    const l0 = levelParams(0, 60, vp);
+    assert.deepEqual([l0.quality, l0.everyNthFrame, l0.maxWidth, l0.maxHeight], [60, 1, 1200, 800]);
+    const l1 = levelParams(1, 60, vp);
+    assert.equal(l1.quality, 60, "the first step keeps the quality");
+    assert.equal(l1.everyNthFrame, 2);
+    const l2 = levelParams(2, 60, vp);
+    assert.equal(l2.quality, 60);
+    assert.equal(l2.maxWidth, 900);
+    const last = levelParams(top, 60, vp);
+    assert.ok(last.quality < 60 && last.quality >= 20);
+    assert.equal(levelParams(top, 25, vp).quality, 20, "never below 20");
+    assert.equal(levelParams(99, 60, vp).level, top, "clamped");
   });
 });
 
-describe("client start-up", () => {
+describe("adaptive streaming in the browser", () => {
   const { HomeBrowser } = require("../src/browser");
 
-  it("tells a new client the stream quality straight away", () => {
+  function socket() {
+    return { readyState: 1, bufferedAmount: 0, sent: [], send(p) { this.sent.push(p); } };
+  }
+
+  it("tells a new client the stream parameters straight away", () => {
     const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
     browser.launch = async () => {};
-    const sent = [];
-    const ws = { readyState: 1, bufferedAmount: 0, send: (p) => sent.push(JSON.parse(p)) };
+    const ws = socket();
     browser.addClient(ws);
-    const info = sent.find((m) => m.type === "stream");
+    const info = ws.sent.map((p) => JSON.parse(p)).find((m) => m.type === "stream");
     assert.ok(info, "a stream message is sent");
     assert.equal(info.quality, info.target);
+    assert.equal(info.level, 0);
+    assert.equal(info.everyNthFrame, 1);
     browser.removeClient(ws);
     browser.adblock.stop();
   });
 
-  it("lowers and restores the quality from frame statistics", () => {
+  it("follows the worst watching viewer, not a sum, and ignores hidden ones", () => {
     const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
     const sent = [];
     browser.broadcast = (m) => sent.push(m);
-    browser._adapt.offered = 20;
-    browser._adapt.held = 12;
+    const phone = socket();
+    const laptop = socket();
+    browser.clients.add(phone);
+    browser.clients.add(laptop);
+    phone._stat = { offered: 20, held: 12 };
+    laptop._stat = { offered: 20, held: 0 };
     browser._adaptTick();
-    assert.equal(browser._adapt.quality, browser.jpegQuality - 10);
+    assert.equal(browser._adapt.level, 1, "one struggling viewer steps the shared stream down");
     assert.equal(sent.at(-1).type, "stream");
-    assert.equal(sent.at(-1).quality, browser.jpegQuality - 10);
-    for (let i = 0; i < 4; i += 1) {
-      browser._adapt.offered = 20;
-      browser._adapt.held = 0;
+    assert.equal(sent.at(-1).everyNthFrame, 2);
+
+    phone._hidden = true;
+    phone._stat = { offered: 20, held: 20 };
+    laptop._stat = { offered: 20, held: 0 };
+    browser._adapt.changedAt = 0;
+    for (let i = 0; i < 4; i += 1) browser._adaptTick();
+    assert.equal(browser._adapt.level, 0, "a hidden viewer's backlog does not count");
+    browser.adblock.stop();
+  });
+
+  it("never restarts the screencast twice in quick succession", () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    browser.broadcast = () => {};
+    const ws = socket();
+    browser.clients.add(ws);
+    for (let i = 0; i < 3; i += 1) {
+      ws._stat = { offered: 20, held: 20 };
       browser._adaptTick();
     }
-    assert.equal(browser._adapt.quality, browser.jpegQuality);
+    assert.equal(browser._adapt.level, 1, "further steps wait for the restart interval");
+    browser._adapt.changedAt = Date.now() - 4000;
+    ws._stat = { offered: 20, held: 20 };
+    browser._adaptTick();
+    assert.equal(browser._adapt.level, 2);
     browser.adblock.stop();
+  });
+});
+
+describe("viewers", () => {
+  const { HomeBrowser } = require("../src/browser");
+
+  function socket() {
+    return { readyState: 1, bufferedAmount: 0, sent: [], send(p) { this.sent.push(p); } };
+  }
+
+  it("sends no frames to a client that is not on screen, and resumes when it returns", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const phone = socket();
+    const laptop = socket();
+    browser.clients.add(phone);
+    browser.clients.add(laptop);
+    await browser.setClientHidden(phone, true);
+    assert.equal(browser._viewers(), 1);
+    browser._sendFrame(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 1, 100, 100);
+    assert.equal(phone.sent.length, 0);
+    assert.equal(laptop.sent.length, 1);
+    await browser.setClientHidden(phone, false);
+    browser._sendFrame(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 1, 100, 100);
+    assert.equal(phone.sent.length, 1);
+    browser.adblock.stop();
+  });
+
+  it("stops encoding altogether when nobody is watching", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    let stopped = 0;
+    browser._stopScreencast = async () => { stopped += 1; };
+    const only = socket();
+    browser.clients.add(only);
+    await browser.setClientHidden(only, true);
+    assert.equal(stopped, 1);
+    assert.equal(browser._viewers(), 0);
+    browser._sendFrame(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 1, 100, 100);
+    assert.equal(only.sent.length, 0);
+    browser.adblock.stop();
+  });
+
+  it("treats any input from a hidden device as proof that it is watching again", async () => {
+    const browser = new HomeBrowser({ homeUrl: "https://example.com/" });
+    const phone = socket();
+    browser.clients.add(phone);
+    await browser.setClientHidden(phone, true);
+    // Not ready (no Chromium in tests): the un-hide must still be recorded.
+    let shown = 0;
+    browser.setClientHidden = async (ws, hidden) => { ws._hidden = hidden; if (!hidden) shown += 1; };
+    browser.handleInput({ type: "hittest", x: 1, y: 1, seq: 1 }, phone);
+    assert.equal(shown, 1);
+    assert.equal(phone._hidden, false);
+    browser.adblock.stop();
+  });
+});
+
+describe("shared memory flag", () => {
+  const GB = 1024 * 1024 * 1024;
+  const fsOf = (bytes) => () => ({ bsize: 4096, blocks: bytes / 4096 });
+
+  it("honours an explicit override", () => {
+    assert.equal(useDevShm({ CHROME_DEV_SHM: "1" }, fsOf(0)), true);
+    assert.equal(useDevShm({ CHROME_DEV_SHM: "0" }, fsOf(8 * GB)), false);
+  });
+
+  it("uses /dev/shm only when the container was given room (Linux)", { skip: process.platform !== "linux" }, () => {
+    assert.equal(useDevShm({}, fsOf(GB)), true);
+    assert.equal(useDevShm({}, fsOf(64 * 1024 * 1024)), false, "Docker's 64 MB default keeps the safe flag");
+    assert.equal(useDevShm({}, () => { throw new Error("no /dev/shm"); }), false);
   });
 });

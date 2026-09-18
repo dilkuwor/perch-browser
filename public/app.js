@@ -105,6 +105,9 @@
     searchUrl: "https://www.google.com/search?q=%s",
     rtt: null,
     stream: null,
+    wheel: null,
+    wheelFrame: 0,
+    fallbackTimer: null,
     statFrames: 0,
     statBytes: 0,
     statAt: 0,
@@ -770,15 +773,23 @@
     btnLatency.title = state.rtt == null ? "Latency" : `Latency: ${Math.round(state.rtt)} ms`;
   }
 
-  // Picture quality actually in use. Below the setting means the server has stepped it
-  // down because this link could not keep up; it climbs back once the link is calm.
+  // What the server is actually streaming. "(auto)" means it has stepped down — fewer
+  // frames, a smaller picture, then a lower quality — because this link could not keep
+  // up; it climbs back once the link has been calm for a few seconds.
   function renderQuality() {
     const q = state.stream;
     if (!q) {
       latQuality.textContent = "…";
       return;
     }
-    latQuality.textContent = q.quality < q.target ? `${q.quality}% (auto, set ${q.target}%)` : `${q.quality}%`;
+    if (!q.level) {
+      latQuality.textContent = `${q.quality}%`;
+      return;
+    }
+    const parts = [`${q.quality}%`];
+    if (q.everyNthFrame > 1) parts.push(`1/${q.everyNthFrame} frames`);
+    if (q.scale < 1) parts.push(`${Math.round(q.scale * 100)}% size`);
+    latQuality.textContent = `${parts.join(" · ")} (auto)`;
   }
 
   function sendPing() {
@@ -981,7 +992,7 @@
   function decodeJpeg(bytes) {
     const blob = new Blob([bytes], { type: "image/jpeg" });
     if (typeof createImageBitmap === "function") {
-      return createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+      return createImageBitmap(blob, { premultiplyAlpha: "none" });
     }
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(blob);
@@ -1422,11 +1433,25 @@
     setLive(false);
     seedTabs();
     ensureSocket();
-    loadSettings();
     refreshIp();
-    refreshTabs();
     sendResize();
     viewport.focus();
+  }
+
+  // Settings and the tab list arrive on the socket as it opens. If they have not within
+  // a moment (an older server, or a proxy that dropped the message), fetch them instead.
+  const FALLBACK_MS = 1500;
+  let gotSettings = false;
+  let gotTabs = false;
+
+  function armFallback() {
+    clearTimeout(state.fallbackTimer);
+    gotSettings = false;
+    gotTabs = false;
+    state.fallbackTimer = setTimeout(() => {
+      if (!gotSettings) loadSettings();
+      if (!gotTabs) refreshTabs();
+    }, FALLBACK_MS);
   }
 
   async function refreshIp() {
@@ -1670,6 +1695,21 @@
     vv.addEventListener("scroll", syncKeyboardInset);
   }
 
+  // ——— visibility ———
+
+  // When Perch is not on screen (another browser tab, phone app in the background) the
+  // server is told to stop sending pictures to this device; sound carries on. Coming
+  // back asks for a fresh frame, so the view is current the moment it is visible again.
+  // Phones do not always fire visibilitychange on the way back, so focus and pageshow
+  // report too, and the server treats any input from a device as proof it is watching.
+  function sendVisibility() {
+    sendWs({ type: "visibility", hidden: document.visibilityState === "hidden" });
+  }
+
+  document.addEventListener("visibilitychange", sendVisibility);
+  window.addEventListener("focus", sendVisibility);
+  window.addEventListener("pageshow", sendVisibility);
+
   // ——— socket ———
 
   function closeSocket() {
@@ -1709,8 +1749,10 @@
       if (gen !== state.wsGen) return;
       wsDot.classList.add("on");
       state.reconnectDelay = 500;
+      armFallback();
       sendResize(true);
       sendAudioPref();
+      sendVisibility();
       // Measure at once so the gauge needle settles without waiting for the 5 s tick.
       sendPing();
     });
@@ -1728,6 +1770,7 @@
         return;
       }
       if (appScreen.hidden) return;
+      if (!gotSettings && !state.fallbackTimer) armFallback();
       const wait = state.reconnectDelay;
       state.reconnectDelay = Math.min(state.reconnectDelay * 2, 8000);
       state.reconnectTimer = setTimeout(() => {
@@ -1769,6 +1812,7 @@
         return;
       }
       if (msg.type === "tabs") {
+        gotTabs = true;
         renderTabs(msg.tabs, msg.active);
         return;
       }
@@ -1777,6 +1821,7 @@
         return;
       }
       if (msg.type === "settings") {
+        gotSettings = true;
         applySettings(msg);
         return;
       }
@@ -1785,7 +1830,13 @@
         return;
       }
       if (msg.type === "stream") {
-        state.stream = { quality: Number(msg.quality) || 0, target: Number(msg.target) || 0 };
+        state.stream = {
+          quality: Number(msg.quality) || 0,
+          target: Number(msg.target) || 0,
+          level: Number(msg.level) || 0,
+          everyNthFrame: Number(msg.everyNthFrame) || 1,
+          scale: Number(msg.scale) || 1,
+        };
         if (!latencyPanel.hidden) renderQuality();
         return;
       }
@@ -1821,6 +1872,10 @@
   function sendWs(obj) {
     const ws = state.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // A click or key press must not overtake scrolling that happened just before it.
+    if (state.wheel && obj && obj.type !== "wheel" && (obj.type === "key" || obj.type === "paste" || (obj.type === "mouse" && obj.action !== "move"))) {
+      flushWheel();
+    }
     if (obj && obj.type === "mouse" && obj.action === "move" && ws.bufferedAmount > 256000) return;
     ws.send(JSON.stringify(obj));
   }
@@ -1935,6 +1990,19 @@
     e.preventDefault();
   });
 
+  // Trackpads fire 60–120 wheel events a second. They are summed and sent once per
+  // display frame: the same total scroll, a fraction of the messages, and nothing is
+  // ever sent faster than the screen could show the result. A change of modifier keys
+  // (Ctrl+wheel zoom vs. plain scroll) flushes first, so deltas never mix meanings.
+  // Touch scrolling (below) has its own path and is not affected.
+  function flushWheel() {
+    cancelAnimationFrame(state.wheelFrame);
+    state.wheelFrame = 0;
+    const w = state.wheel;
+    state.wheel = null;
+    if (w && (w.deltaX || w.deltaY)) sendWs(w);
+  }
+
   viewport.addEventListener("wheel", (e) => {
     if (!state.live) return;
     e.preventDefault();
@@ -1942,16 +2010,17 @@
     let scale = 1;
     if (e.deltaMode === 1) scale = 32;
     else if (e.deltaMode === 2) scale = p.vh;
-    sendWs({
-      type: "wheel",
-      x: p.x,
-      y: p.y,
-      vw: p.vw,
-      vh: p.vh,
-      deltaX: e.deltaX * scale,
-      deltaY: e.deltaY * scale,
-      ...mods(e),
-    });
+    const m = mods(e);
+    const w = state.wheel;
+    if (w && (w.alt !== m.alt || w.ctrl !== m.ctrl || w.meta !== m.meta || w.shift !== m.shift)) flushWheel();
+    if (state.wheel) {
+      state.wheel.deltaX += e.deltaX * scale;
+      state.wheel.deltaY += e.deltaY * scale;
+      Object.assign(state.wheel, { x: p.x, y: p.y, vw: p.vw, vh: p.vh });
+    } else {
+      state.wheel = { type: "wheel", x: p.x, y: p.y, vw: p.vw, vh: p.vh, deltaX: e.deltaX * scale, deltaY: e.deltaY * scale, ...m };
+    }
+    if (!state.wheelFrame) state.wheelFrame = requestAnimationFrame(flushWheel);
   }, { passive: false });
 
   // ——— touch: one finger drags scroll, a still finger taps, a long press right-clicks ———
