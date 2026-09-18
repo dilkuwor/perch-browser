@@ -4,8 +4,6 @@
 
 This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>` of google.com (that is blocked by almost every site). It is a real remote Chromium — your own vantage on the web, kept at home.
 
-> The npm package is named `home-browser` and the Docker image is `perch-browser`; **Perch** is the product name.
-
 ## Screenshots
 
 **Sign in** — password-only, single session. The host name shown reflects wherever you open it.
@@ -48,8 +46,6 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 - Docker and Docker Compose (recommended), **or** Node.js 20+ with Google Chrome / Chromium installed
 - A password for `APP_PASSWORD`
 
-Single Chromium session: there is one browser process. A second login uses — and can take over — that same session, sharing its cookies, tabs, and page.
-
 ## Run with Docker (recommended)
 
 A prebuilt image is published on Docker Hub as [`dpksamir/perch-browser`](https://hub.docker.com/r/dpksamir/perch-browser), so there is nothing to build — and with `docker run` you do not even need to clone this repository:
@@ -62,7 +58,7 @@ Both methods below use that image. It bundles Chromium, Xvfb, PulseAudio, and ff
 
 ### Docker Compose
 
-1. Create your configuration from the template and set a password:
+1. In the repository directory, create your configuration from the template and set a password:
 
    ```bash
    cp .env.example .env
@@ -116,10 +112,14 @@ docker rm -f perch-browser    # then repeat the docker run command above
 
 ```bash
 docker build -t perch-browser .
+docker volume create perch-chrome-profile
+
 docker run -d \
   --name perch-browser \
+  --restart unless-stopped \
   -p 8080:8080 \
   -e APP_PASSWORD="choose-a-long-password" \
+  -v perch-chrome-profile:/data/chrome \
   --shm-size="1gb" \
   perch-browser
 ```
@@ -202,9 +202,11 @@ All settings are read from environment variables (via `.env` when running native
 1. **Egress is the home server.** Click the **Find my IP** speed dial, or type `ifconfig.me` / `find my ip` in the address bar. The page must show the **home server's public IP**, not the laptop or phone. The same value is returned by the API, fetched on the server:
 
    ```bash
-   # after login, from a machine that has the session cookie — or from the server:
+   # Returns 401 without a session cookie, as expected:
    curl -s http://127.0.0.1:8080/api/ip
-   # 401 without a session cookie, as expected
+
+   # With a valid session cookie, returns the server's egress IP:
+   curl -s -b "hb_session=<your-session-token>" http://127.0.0.1:8080/api/ip
    ```
 
 2. **Input reaches real Chromium.** Type `google.com` and press **Go**, then click the Google search box **inside the viewport** and type. Characters must appear — proof that input reaches a live Chromium, not a screenshot.
@@ -214,7 +216,7 @@ All settings are read from environment variables (via `.env` when running native
 ### Address bar
 
 - `example.com` → `https://example.com`
-- Text with no dot (and no scheme) → Google search
+- Text with no dot (and no scheme) → Search query (Google by default, or the engine chosen in Settings)
 - `find my ip` / `what is my ip` / `ifconfig.me` → `https://ifconfig.me/`
 
 ### Tabs
@@ -314,7 +316,7 @@ To serve Perch over HTTPS, put it behind Caddy or Nginx. The proxy **must** forw
 **Caddy**
 
 ```caddy
-vpn.bytetech.cloud {
+perch.example.com {
     reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -338,8 +340,24 @@ The session cookie is `HttpOnly` and `SameSite=Lax`, and is marked `Secure` when
 
 ## Health
 
+The health endpoint requires no authentication and returns server status, build version, active features, and Chromium readiness:
+
 ```bash
 curl -s http://127.0.0.1:8080/health
+```
+
+Example response:
+
+```json
+{
+  "ok": true,
+  "status": "ok",
+  "build": 4,
+  "features": ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", "adaptive-quality", "audio"],
+  "chromium": true,
+  "audio": "idle",
+  "user": "admin"
+}
 ```
 
 ## Security notes
