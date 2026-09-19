@@ -4,6 +4,12 @@
 
 This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>` of google.com (that is blocked by almost every site). It is a real remote Chromium — your own vantage on the web, kept at home.
 
+## Live demo
+
+**https://demo-perch.bytetech.cloud** — password `demo`
+
+A shared, restricted demo: it can only open google.com, and it is reset regularly. Do not enter anything personal.
+
 ## Screenshots
 
 **Sign in** — password-only, single session. The host name shown reflects wherever you open it.
@@ -29,6 +35,7 @@ This is **not** a VPN, **not** an HTML-rewriting proxy, and **not** an `<iframe>
 
 ## Table of contents
 
+- [Live demo](#live-demo)
 - [Requirements](#requirements)
 - [Run with Docker (recommended)](#run-with-docker-recommended)
 - [Run natively (Ubuntu / Debian)](#run-natively-ubuntu--debian)
@@ -107,6 +114,10 @@ Then open `http://<server>:8080` and sign in. To update later, pull the new imag
 docker pull dpksamir/perch-browser:latest
 docker rm -f perch-browser    # then repeat the docker run command above
 ```
+
+### Public demo stack
+
+[`docker-compose.demo.yml`](docker-compose.demo.yml) runs Perch as a public demo: the browser has no route to the internet or your LAN except through a filtering proxy that allows only the listed domains (google.com by default). Point your reverse proxy at port `9998`, and restart the container on a schedule to wipe visitors' changes.
 
 ### Build from source
 
