@@ -33,9 +33,20 @@ A shared, restricted demo: it can only open google.com, and it is reset regularl
 - **Phone-ready, and installable.** Touch scrolling, tap-to-click, long-press right-click, an on-screen keyboard, and a viewport sized to your screen. Add it to your home screen and it runs as a full-screen app (PWA).
 - **Single session.** One shared browser; a second login joins — and can take over — the same tabs and cookies.
 
+## Use cases
+
+- **Untrusted or borrowed devices (zero footprint).** Browse and log into personal accounts on a work laptop, public computer, or friend's machine without leaving cookies, cached files, or search history behind. Everything stays in your container at home.
+- **Clientless access through strict firewalls.** Access your home vantage from hotel, school, or corporate networks where VPN protocols (WireGuard, OpenVPN, IPSec) are blocked. Perch runs over standard HTTPS and WebSocket (port 443).
+- **Home LAN management on the go.** Open internal routers, NAS admin dashboards, and homelab web interfaces (`192.168.x.x`) remotely without publishing their ports or setting up a full VPN subnet.
+- **Home IP egress while traveling.** Websites see your residential broadband IP instead of roaming cellular or public Wi-Fi IPs, avoiding geo-blocking, reCAPTCHAs, and suspicious-login flags.
+- **Battery and data savings on mobile.** Heavy web apps, complex JavaScript, and bloated pages render on your home server rather than draining your phone's battery. With built-in ad blocking and adaptive streaming, idle pages use virtually zero data.
+- **Seamless device handoff.** Open tabs and start research on a desktop, then open Perch on your phone and continue with the exact same tabs, cookies, and state without needing sync or account log-ins.
+- **Browser isolation & security sandbox.** Investigate unfamiliar links, test suspicious pages, or sandbox downloads in a throwaway headless environment without risking malware on your local operating system.
+
 ## Table of contents
 
 - [Live demo](#live-demo)
+- [Use cases](#use-cases)
 - [Requirements](#requirements)
 - [Run with Docker (recommended)](#run-with-docker-recommended)
 - [Run natively (Ubuntu / Debian)](#run-natively-ubuntu--debian)
