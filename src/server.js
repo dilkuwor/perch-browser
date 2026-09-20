@@ -85,7 +85,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     status: "ok",
     build: BUILD,
-    features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", "adaptive-quality", ...(browser.audioEnabled ? ["audio"] : [])],
+    features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", "adaptive-quality", "cache", ...(browser.audioEnabled ? ["audio"] : [])],
     chromium: browser.ready,
     audio: browser.audioEnabled ? (browser.audioActive ? "streaming" : "idle") : "disabled",
     user: APP_USER,
@@ -240,6 +240,20 @@ app.get("/api/background", auth.requireAuth.bind(auth), (_req, res) => {
   // The client adds ?v=<backgroundVersion>, so a given URL never changes content.
   res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
   res.sendFile(bg.file);
+});
+
+// What Chromium's caches take on disk, and a way to drop them (plus renderer memory)
+// when a long session has made the server heavy. Cookies, logins and tabs survive.
+app.get("/api/cache", auth.requireAuth.bind(auth), async (_req, res) => {
+  res.json({ ok: true, bytes: await browser.cacheSize() });
+});
+
+app.post("/api/cache/clear", auth.requireAuth.bind(auth), async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await browser.clearCache()) });
+  } catch (err) {
+    res.status(503).json({ error: err.message || "Could not clear the cache" });
+  }
 });
 
 app.get("/api/tabs", auth.requireAuth.bind(auth), async (_req, res) => {

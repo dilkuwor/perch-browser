@@ -459,6 +459,7 @@
       blurKbd();
       loadSettings();
       refreshAbout();
+      refreshCache();
       settingsBody.scrollTop = 0;
       document.getElementById("settings-close").focus({ preventScroll: true });
     } else {
@@ -659,6 +660,47 @@
     } finally {
       pwSubmit.disabled = false;
       pwSubmit.textContent = "Update password";
+    }
+  });
+
+  // ——— cache ———
+
+  const btnCache = document.getElementById("cache-clear");
+  const cacheSize = document.getElementById("cache-size");
+
+  function fmtSize(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${Math.round(bytes)} B`;
+  }
+
+  function renderCacheSize(bytes) {
+    // Below 1 KB only Chromium's empty index files remain.
+    cacheSize.textContent = typeof bytes !== "number" ? "" : bytes < 1024 ? "Nothing cached right now." : `Using ${fmtSize(bytes)} on disk.`;
+  }
+
+  async function refreshCache() {
+    try {
+      renderCacheSize((await api("/api/cache")).bytes);
+    } catch {
+      // An older server without the route: the button will explain when clicked.
+      renderCacheSize(null);
+    }
+  }
+
+  btnCache.addEventListener("click", async () => {
+    btnCache.disabled = true;
+    btnCache.textContent = "Clearing…";
+    try {
+      const reply = await api("/api/cache/clear", { method: "POST" });
+      showSaved(reply.freed > 0 ? `Cache cleared — ${fmtSize(reply.freed)} freed` : "Cache cleared");
+      renderCacheSize(reply.bytes);
+    } catch (err) {
+      saveError("Could not clear the cache", err);
+    } finally {
+      btnCache.disabled = false;
+      btnCache.textContent = "Clear";
     }
   });
 

@@ -299,6 +299,50 @@ function userDataDir() {
   );
 }
 
+// Where Chromium piles up cached pages, compiled scripts and service-worker storage
+// inside its profile: the directories a cache clear empties, so the size shown is what
+// the button can free. The GPU/shader caches are left out: they are small, fixed-size
+// preallocations that never shrink. Cookies, logins, site data and open tabs live
+// elsewhere in the profile and are never touched.
+const CACHE_DIRS = [
+  "Default/Cache",
+  "Default/Code Cache",
+  "Default/Media Cache",
+  "Default/Service Worker/CacheStorage",
+  "Default/Service Worker/ScriptCache",
+];
+
+function cacheDirs(dir = userDataDir()) {
+  return CACHE_DIRS.map((rel) => path.join(dir, ...rel.split("/")));
+}
+
+// Bytes on disk under `dirs`; a missing directory counts as empty. Best-effort: a file
+// Chromium evicts mid-walk is simply skipped.
+async function dirSize(dirs) {
+  let total = 0;
+  const walk = async (dir) => {
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(p);
+      else if (entry.isFile()) {
+        try {
+          total += (await fs.promises.stat(p)).size;
+        } catch {
+          // evicted while we looked
+        }
+      }
+    }
+  };
+  for (const dir of Array.isArray(dirs) ? dirs : [dirs]) await walk(dir);
+  return total;
+}
+
 function findChrome() {
   const fromEnv = process.env.CHROME_PATH && process.env.CHROME_PATH.trim();
   if (fromEnv) {
@@ -663,6 +707,7 @@ class HomeBrowser {
     this._editableTimer = null;
     this._lastEditable = "";
     this._lastScroll = { x: -1, y: -1 };
+    this._cacheClearing = null;
     this.adblock = new AdBlocker({
       // Lives inside the Chrome profile so it shares its volume/persistence.
       dataDir: path.join(userDataDir(), "perch-adblock"),
@@ -1989,6 +2034,55 @@ class HomeBrowser {
     }
   }
 
+  // ——— cache ———
+
+  cacheSize() {
+    return dirSize(cacheDirs());
+  }
+
+  // Frees what Chromium has accumulated on the server: the HTTP cache, compiled-code and
+  // shader caches, Cache Storage and service workers, then asks every renderer to drop
+  // memory it can rebuild. Cookies, logins, site data and open tabs are kept, so nothing
+  // signs out. A second call while one is running joins it.
+  clearCache() {
+    if (!this._cacheClearing) {
+      this._cacheClearing = this._clearCache().finally(() => {
+        this._cacheClearing = null;
+      });
+    }
+    return this._cacheClearing;
+  }
+
+  async _clearCache() {
+    const before = await this.cacheSize();
+    if (this.browser && this.page) {
+      const cdp = await this.page.createCDPSession().catch(() => null);
+      if (cdp) {
+        const send = (method, params, ms) => withTimeout(cdp.send(method, params).catch(() => null), ms, null);
+        await send("Network.clearBrowserCache", undefined, 30_000);
+        await send(
+          "Storage.clearDataForOrigin",
+          { origin: "*", storageTypes: "cache_storage,service_workers,shader_cache" },
+          30_000
+        );
+        await send("Memory.simulatePressureNotification", { level: "critical" }, 5_000);
+        await this._detach(cdp);
+      }
+      for (const page of await this._openPages()) {
+        const session = await page.createCDPSession().catch(() => null);
+        if (!session) continue;
+        const send = (method) => withTimeout(session.send(method).catch(() => null), 5_000, null);
+        await send("Memory.forciblyPurgeJavaScriptMemory");
+        await send("HeapProfiler.collectGarbage");
+        await this._detach(session);
+      }
+    }
+    const after = await this.cacheSize();
+    const freed = Math.max(0, before - after);
+    console.log(`[home-browser] cache cleared: ${(freed / 1048576).toFixed(1)} MB freed, ${(after / 1048576).toFixed(1)} MB left`);
+    return { freed, bytes: after };
+  }
+
   async close() {
     this.closed = true;
     this._stopMetaPoll();
@@ -2035,6 +2129,8 @@ module.exports = {
   HomeBrowser,
   resolveUrl,
   findChrome,
+  cacheDirs,
+  dirSize,
   encodeFrame,
   decodeFrameHeader,
   keyEvents,

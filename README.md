@@ -26,7 +26,7 @@ A shared, restricted demo: it can only open google.com, and it is reset regularl
 - **Egress from home.** Every site sees your home network's public IP, not the device in your hand.
 - **Sound.** What Chromium plays at home — video, music, calls — streams to the device as Opus (or raw PCM on browsers without WebCodecs), with a mute button in the title bar.
 - **Ad blocker.** One click on the shield in the title bar blocks ads, trackers, video ads, pop-ups, and cookie banners with the EasyList and uBlock Origin filter lists — and because ads are never rendered, there is less to stream.
-- **Settings.** A settings page for choosing which tools appear in the top bar, the new-tab wallpaper (upload your own), search engine, home page, and stream quality — saved on the server and shared by every device.
+- **Settings.** A settings page for choosing which tools appear in the top bar, the new-tab wallpaper (upload your own), search engine, home page, and stream quality — saved on the server and shared by every device. A **Clear cache** button frees the disk cache and memory Chromium accumulates on the server over a long session, without signing you out of anything.
 - **Tabs.** A real tab strip to open, switch, and close tabs. Popups and SSO windows take over the view and hand it back when closed.
 - **Non-blocking navigation.** Keep full mouse and keyboard control while a page loads, with no stale frames after a URL change.
 - **Sign-in friendly.** Real key events, hover-before-click, and no automation banner, so Google's "are you human?" checks and corporate SSO behave like a local browser.
