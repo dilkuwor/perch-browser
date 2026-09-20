@@ -50,8 +50,11 @@ function compress(buf) {
 }
 
 class StaticAssets {
-  constructor(publicDir) {
+  // `release` (see version.js) rides along in the page, so the login screen can show which
+  // build it is talking to before anyone signs in.
+  constructor(publicDir, { release } = {}) {
     this.dir = path.resolve(publicDir);
+    this.release = release || null;
     this.files = new Map(); // rel path -> { stamp, raw }
     this.built = new Map(); // key -> { stamp, entry }
   }
@@ -165,7 +168,7 @@ class StaticAssets {
         `<meta name="apple-mobile-web-app-capable" content="yes" />`,
         `<meta name="apple-mobile-web-app-title" content="Perch" />`,
         `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />`,
-        `<script>window.__PERCH=${JSON.stringify({ v: this.version(), assets: images })};</script>`,
+        `<script>window.__PERCH=${JSON.stringify({ v: this.version(), assets: images, release: this.release })};</script>`,
       ].join("\n  ");
       const text = this._raw("index.html")
         .raw.toString("utf8")

@@ -330,6 +330,16 @@ html[data-session="remembered"] .login-screen {
   letter-spacing: 0.02em;
 }
 
+.login-version {
+  margin-top: 4px;
+  opacity: 0.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.login-version:empty {
+  display: none;
+}
+
 .field input:focus {
   border-color: rgba(110, 168, 255, 0.7);
   box-shadow: 0 0 0 3px rgba(110, 168, 255, 0.18);

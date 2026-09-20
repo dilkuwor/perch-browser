@@ -19,6 +19,20 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY src ./src
 COPY public ./public
+
+# Stamped by CI (run number, commit, date) so every published image reports its own build
+# on /health and the login page. A local `docker build` without these is a "dev" build.
+ARG PERCH_BUILD=dev
+ARG PERCH_COMMIT=
+ARG PERCH_BUILD_DATE=
+ENV PERCH_BUILD=$PERCH_BUILD \
+    PERCH_COMMIT=$PERCH_COMMIT \
+    PERCH_BUILD_DATE=$PERCH_BUILD_DATE
+LABEL org.opencontainers.image.title="Perch" \
+      org.opencontainers.image.source="https://github.com/dpksamir/perch-browser" \
+      org.opencontainers.image.revision=$PERCH_COMMIT \
+      org.opencontainers.image.created=$PERCH_BUILD_DATE \
+      org.opencontainers.image.version=$PERCH_BUILD
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh \
   && mkdir -p /data/chrome \

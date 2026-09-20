@@ -68,7 +68,13 @@ describe("versioned assets", () => {
     assert.match(html, /href="\/styles\.css\?v=[0-9a-f]{16}"/);
     assert.match(html, /src="\/app\.js\?v=[0-9a-f]{16}"/);
     assert.match(html, /rel="manifest"/);
-    assert.match(html, /window\.__PERCH=\{"v":"[0-9a-f]{16}","assets":\{"img\/bg\.webp":"[0-9a-f]{16}"\}\}/);
+    assert.match(html, /window\.__PERCH=\{"v":"[0-9a-f]{16}","assets":\{"img\/bg\.webp":"[0-9a-f]{16}"\},"release":null\}/);
+  });
+
+  it("stamps the running release into the page for the login screen", () => {
+    const release = { version: "1.0.0", build: "57", commit: "abc1234", date: "2026-09-20", label: "v1.0.0 · build 57 · abc1234" };
+    const html = new StaticAssets(dir, { release }).html().body.toString();
+    assert.ok(html.includes(`"release":${JSON.stringify(release)}`));
   });
 
   it("caches the current version forever and makes anything else revalidate", () => {

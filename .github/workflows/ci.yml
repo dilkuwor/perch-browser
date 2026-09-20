@@ -99,15 +99,23 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Every image gets a new build number (this workflow's run number) plus the commit
+      # and date, which the app shows on /health and the login page.
       - name: Build and push
         if: steps.changes.outputs.image == 'true'
         env:
           SHA: ${{ github.sha }}
+          BUILD: ${{ github.run_number }}
           NS: ${{ secrets.DOCKERHUB_USERNAME }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
+          VERSION="$(node -p "require('./package.json').version")"
           docker buildx build \
             --push \
+            --build-arg "PERCH_BUILD=$BUILD" \
+            --build-arg "PERCH_COMMIT=$SHA" \
+            --build-arg "PERCH_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t "$NS/$IMAGE_NAME:$SHA" \
+            -t "$NS/$IMAGE_NAME:$VERSION-$BUILD" \
             -t "$NS/$IMAGE_NAME:latest" \
             .

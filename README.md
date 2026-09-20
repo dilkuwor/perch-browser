@@ -134,6 +134,9 @@ docker rm -f perch-browser    # then repeat the docker run command above
 
 ```bash
 docker build -t perch-browser .
+# Optional: stamp the image with a build number and commit, as CI does, so the login
+# page and /health report it instead of "dev":
+#   docker build --build-arg PERCH_BUILD=1 --build-arg PERCH_COMMIT=$(git rev-parse HEAD) -t perch-browser .
 docker volume create perch-chrome-profile
 
 docker run -d \
@@ -362,7 +365,7 @@ The session cookie is `HttpOnly` and `SameSite=Lax`, and is marked `Secure` when
 
 ## Health
 
-The health endpoint requires no authentication and returns server status, build version, active features, and Chromium readiness:
+The health endpoint requires no authentication and returns server status, the running release, active features, and Chromium readiness. The same release label is shown at the bottom of the login page and under Settings → About. `build` is the protocol number clients check against; `release` identifies the build itself: the version from `package.json`, the CI run number that built the image (`dev` for a local build or checkout), the commit and the date. Every image published from `main` therefore carries a new build number, and is also tagged `<version>-<build>` on Docker Hub:
 
 ```bash
 curl -s http://127.0.0.1:8080/health
@@ -375,6 +378,7 @@ Example response:
   "ok": true,
   "status": "ok",
   "build": 4,
+  "release": { "version": "1.0.0", "build": "57", "commit": "9c0693d", "date": "2026-09-20", "label": "v1.0.0 · build 57 · 9c0693d" },
   "features": ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", "adaptive-quality", "audio"],
   "chromium": true,
   "audio": "idle",

@@ -472,8 +472,12 @@
     try {
       const health = await api("/health");
       if (health.user) document.getElementById("pw-user").value = health.user;
+      const release = health.release || RELEASE;
+      document.getElementById("about-version").textContent = release && release.label
+        ? `${release.label}${release.date ? ` · ${release.date}` : ""}`
+        : "unknown";
       document.getElementById("about-server").textContent =
-        `build ${health.build ?? "?"} · ${(health.features || []).join(", ")}`;
+        `protocol ${health.build ?? "?"} · ${(health.features || []).join(", ")}`;
     } catch {
       // ignore
     }
@@ -2412,9 +2416,14 @@
 
   if (!isTouchDevice) btnKbd.title = "Keyboard (for touch devices)";
 
+  // The running server's build (see src/version.js), stamped into the page it served.
+  const RELEASE = (window.__PERCH && window.__PERCH.release) || null;
+
   (function brandHost() {
     const foot = document.querySelector(".login-foot");
     if (foot) foot.textContent = `Single session · password-protected · ${HOST_LABEL}`;
+    const version = document.getElementById("login-version");
+    if (version && RELEASE && RELEASE.label) version.textContent = RELEASE.label;
     const kicker = document.querySelector(".start-kicker");
     if (kicker) kicker.textContent = `Perch · ${HOST_LABEL}`;
     document.title = `Perch — ${HOST_LABEL}`;

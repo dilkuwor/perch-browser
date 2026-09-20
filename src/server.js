@@ -11,6 +11,7 @@ const { Auth, clientIp } = require("./auth");
 const { HomeBrowser, resolveUrl } = require("./browser");
 const { Settings, SEARCH_ENGINES, BACKGROUND_MAX_BYTES } = require("./settings");
 const { StaticAssets } = require("./static");
+const { describeBuild } = require("./version");
 
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const APP_USER = process.env.APP_USER || "admin";
@@ -21,6 +22,7 @@ const HOME_URL = process.env.HOME_URL || "https://www.google.com/";
 // to an older process. Adaptive quality + settings over the socket landed in build 4,
 // audio in build 3, tabs + binary screencast in build 2.
 const BUILD = 4;
+const RELEASE = describeBuild();
 
 if (!APP_PASSWORD) {
   console.error("Refusing to start: APP_PASSWORD is missing.");
@@ -85,6 +87,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     status: "ok",
     build: BUILD,
+    release: RELEASE,
     features: ["tabs", "binary-frames", "latency", "adblock", "settings", "password", "pwa", "adaptive-quality", "cache", ...(browser.audioEnabled ? ["audio"] : [])],
     chromium: browser.ready,
     audio: browser.audioEnabled ? (browser.audioActive ? "streaming" : "idle") : "disabled",
@@ -283,7 +286,7 @@ app.post("/api/tab", auth.requireAuth.bind(auth), async (req, res) => {
   }
 });
 
-const assets = new StaticAssets(path.join(__dirname, "..", "public"));
+const assets = new StaticAssets(path.join(__dirname, "..", "public"), { release: RELEASE });
 app.use(assets.middleware());
 
 app.use((req, res) => {
@@ -439,6 +442,7 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 server.listen(PORT, HOST, () => {
   console.log(`[home-browser] http://${HOST}:${PORT}  user=${APP_USER}`);
+  console.log(`[home-browser] ${RELEASE.label}${RELEASE.date ? ` (${RELEASE.date})` : ""}`);
   console.log("[home-browser] single Chromium session — a second login shares / takes it over");
   browser.launch().catch(() => {
     console.error("[home-browser] will keep retrying Chromium in the background");
