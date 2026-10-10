@@ -126,10 +126,6 @@ docker pull dpksamir/perch-browser:latest
 docker rm -f perch-browser    # then repeat the docker run command above
 ```
 
-### Public demo stack
-
-[`docker-compose.demo.yml`](docker-compose.demo.yml) runs Perch as a public demo: the browser has no route to the internet or your LAN except through a filtering proxy that allows only the listed domains (google.com by default). Point your reverse proxy at port `9998`, and restart the container on a schedule to wipe visitors' changes.
-
 ### Build from source
 
 ```bash
