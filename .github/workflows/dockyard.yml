@@ -1,4 +1,6 @@
 # Added by `dockyard deploy`. Builds the image, pushes it to ghcr.io and tells Dockyard to deploy it.
+# Also publishes linux/arm64 in the same tags for a 64-bit Raspberry Pi.
+# `dockyard deploy` rewrites this file from its template and will drop the arm64 lines.
 name: Deploy to Dockyard
 
 on:
@@ -14,6 +16,11 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      # arm64 is cross-built on the amd64 runner. amd64 is still the variant Dockyard pulls.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - uses: docker/setup-buildx-action@v3
 
@@ -31,6 +38,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
+          platforms: linux/amd64,linux/arm64
+          # A plain manifest list. Provenance attestations make the digest an OCI index
+          # that older Docker installs (the Pi, and Dockyard) can fail to pull.
+          provenance: false
           tags: |
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.image.outputs.name }}:${{ github.sha }}
